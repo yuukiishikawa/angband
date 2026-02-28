@@ -62,10 +62,32 @@ bool borg_recover(void)
     int            q;
     enum borg_need need;
 
+    extern bool borg_remote;
+    if (borg_remote) {
+        static int recover_dbg = 0;
+        if (recover_dbg++ < 50) {
+            fprintf(stderr, "borg_recover: HP=%d/%d SP=%d/%d LV=%d DEPTH=%d "
+                "LIGHT=%d FOOD=%d GOLD=%d BLIND=%d POISON=%d CUT=%d "
+                "WEAK=%d HUNGRY=%d CONF=%d STUN=%d\n",
+                borg.trait[BI_CURHP], borg.trait[BI_MAXHP],
+                borg.trait[BI_CURSP], borg.trait[BI_MAXSP],
+                borg.trait[BI_CLEVEL], borg.trait[BI_CDEPTH],
+                borg.trait[BI_LIGHT], borg.trait[BI_FOOD],
+                borg.trait[BI_GOLD],
+                borg.trait[BI_ISBLIND], borg.trait[BI_ISPOISONED],
+                borg.trait[BI_ISCUT], borg.trait[BI_ISWEAK],
+                borg.trait[BI_ISHUNGRY], borg.trait[BI_ISCONFUSED],
+                borg.trait[BI_ISSTUN]);
+        }
+    }
+
     /*** Handle annoying situations ***/
     need = borg_maintain_light();
-    if (need == BORG_MET_NEED)
+    if (need == BORG_MET_NEED) {
+        if (borg_remote)
+            fprintf(stderr, "borg_recover: returning true (maintain_light)\n");
         return true;
+    }
     else if (need == BORG_UNMET_NEED)
         borg_note(format("# Need to refuel but cant!"));
 
@@ -365,6 +387,21 @@ bool borg_recover(void)
             || borg.trait[BI_CURSP] < borg.trait[BI_MAXSP]
                                           * (borg.trait[BI_CDEPTH] > 85 ? 7 : 6)
                                           / 10)) {
+        if (borg_remote) {
+            fprintf(stderr, "borg_recover: Just Rest condition met. "
+                "CONF=%d IMAGE=%d AFRAID=%d STUN=%d HSTUN=%d "
+                "HP=%d/%d SP=%d/%d (threshold=%d) "
+                "check_rest=%d scary=%d p=%d fear=%d goal=%d\n",
+                borg.trait[BI_ISCONFUSED], borg.trait[BI_ISIMAGE],
+                borg.trait[BI_ISAFRAID], borg.trait[BI_ISSTUN],
+                borg.trait[BI_ISHEAVYSTUN],
+                borg.trait[BI_CURHP], borg.trait[BI_MAXHP],
+                borg.trait[BI_CURSP], borg.trait[BI_MAXSP],
+                borg.trait[BI_MAXSP] * 6 / 10,
+                borg_check_rest(borg.c.y, borg.c.x), scaryguy_on_level,
+                p, borg_fear_region[borg.c.y / 11][borg.c.x / 11],
+                borg.goal.type);
+        }
         if (borg_check_rest(borg.c.y, borg.c.x) && !scaryguy_on_level
             && p <= borg_fear_region[borg.c.y / 11][borg.c.x / 11]
             && borg.goal.type != GOAL_RECOVER) {

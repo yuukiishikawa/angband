@@ -605,6 +605,12 @@ enum borg_need borg_maintain_light(void)
     int        i;
     borg_item *current_light = &borg_items[INVEN_LIGHT];
 
+    /* In remote mode, the TS server handles light — no fuel management needed */
+    {
+        extern bool borg_remote;
+        if (borg_remote) return BORG_NO_NEED;
+    }
+
     if (of_has(current_light->flags, OF_NO_FUEL))
         return BORG_NO_NEED;
 

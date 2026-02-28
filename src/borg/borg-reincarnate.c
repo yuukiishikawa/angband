@@ -594,4 +594,114 @@ void reincarnate_borg(void)
     /* Done.  Play on */
 }
 
+/*
+ * Create a new character for headless borg auto-start.
+ * This is a simplified version of reincarnate_borg() for first-time
+ * character generation (no existing game state to clean up).
+ * Called from ui-game.c:start_game() when borg_headless is true.
+ */
+void borg_auto_birth(void)
+{
+    char buf[80];
+    int  i;
+    struct player *p = player;
+
+    struct player_race  *p_race  = NULL;
+    struct player_class *p_class = NULL;
+
+    /* Initialize player structure (required before player_generate) */
+    player_init(player);
+
+    /* Pick random race and class */
+    p_race  = player_id2race(randint0(MAX_RACES));
+    p_class = player_id2class(randint0(MAX_CLASSES));
+
+    /* Generate the character */
+    player_generate(player, p_race, p_class, false);
+
+    /* Start in town */
+    player->depth = 0;
+
+    /* Seed for flavors */
+    seed_flavor = randint0(0x10000000);
+    flavor_init();
+
+    /* Embody */
+    memcpy(&p->body, &bodies[p->race->body], sizeof(p->body));
+    my_strcpy(buf, bodies[p->race->body].name, sizeof(buf));
+    p->body.name  = string_make(buf);
+    p->body.slots = mem_zalloc(p->body.count * sizeof(struct equip_slot));
+    for (i = 0; i < p->body.count; i++) {
+        p->body.slots[i].type = bodies[p->race->body].slots[i].type;
+        my_strcpy(buf, bodies[p->race->body].slots[i].name, sizeof(buf));
+        p->body.slots[i].name = string_make(buf);
+    }
+
+    /* Get a random name */
+    create_random_name(
+        player->race->ridx, player->full_name, sizeof(player->full_name));
+
+    /* Give the player some money */
+    player->au = player->au_birth = z_info->start_gold;
+
+    /* Need some HP */
+    borg_roll_hp();
+
+    /* Player knows all combat runes */
+    player->obj_k->to_a = 1;
+    player->obj_k->to_h = 1;
+    player->obj_k->to_d = 1;
+
+    /* Player learns innate runes */
+    player_learn_innate(player);
+
+    /* Initialise the spells */
+    player_spells_init(player);
+
+    /* Outfit the player */
+    borg_outfit_player(player);
+
+    /* Generate town */
+    player->upkeep->generate_level = true;
+    player->upkeep->playing        = true;
+
+    /* Reset stats */
+    struct command fake_cmd;
+    my_strcpy(fake_cmd.arg[0].name, "choice", sizeof(fake_cmd.arg[0].name));
+    fake_cmd.arg[0].data.choice = 1;
+    do_cmd_reset_stats(&fake_cmd);
+
+    /* Initialise the stores, dungeon */
+    store_reset();
+    chunk_list_max = 0;
+
+    /* Restore the standard artifacts */
+    cleanup_parser(&randart_parser);
+    deactivate_randart_file();
+    run_parser(&artifact_parser);
+
+    /* Randomize artifacts if required */
+    if (OPT(player, birth_randarts)) {
+        seed_randart = randint0(0x10000000);
+        do_randart(seed_randart, true);
+        deactivate_randart_file();
+    }
+
+    /* Flush it */
+    Term_fresh();
+
+    /* Fully healed and rested */
+    player->chp = player->mhp;
+    player->csp = player->msp;
+    player->upkeep->energy_use = 100;
+
+    /* The dungeon is not ready, but the player is */
+    character_dungeon   = false;
+    character_generated = true;
+
+    /* Mark savefile as borg cheater */
+    if (!(player->noscore & NOSCORE_BORG))
+        player->noscore |= NOSCORE_BORG;
+}
+
 #endif

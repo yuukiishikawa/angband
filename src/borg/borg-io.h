@@ -78,6 +78,11 @@ extern void borg_dump_recent_keys(int num);
 extern keycode_t borg_inkey(bool take);
 
 /*
+ * Get queue depth
+ */
+extern int borg_key_queue_depth(void);
+
+/*
  * Clear all Borg keypress
  */
 extern void borg_flush(void);

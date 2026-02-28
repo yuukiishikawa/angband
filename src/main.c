@@ -91,6 +91,10 @@ static const struct module modules[] =
 	{ "spoil", help_spoil, init_spoil },
 #endif
 
+#ifdef USE_BORG_FRONTEND
+	{ "borg", help_borg, init_borg_mode },
+#endif
+
 #ifdef USE_IBM
 	{ "ibm", help_ibm, init_ibm },
 #endif /* USE_IBM */
@@ -574,8 +578,9 @@ int main(int argc, char *argv[])
 	quit_nested = quit_aux;
 	quit_aux = extended_quit_hook;
 
-	/* Wait for response */
-	pause_line(Term);
+	/* Wait for response (skip in headless borg mode) */
+	if (!borg_headless)
+		pause_line(Term);
 
 	/* Play the game */
 	play_game((select_game) ?

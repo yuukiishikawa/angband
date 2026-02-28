@@ -149,8 +149,15 @@ void borg_cheat_store(void)
     int             slot, i;
     int             store_num;
     struct object  *o_ptr;
-    struct object **list
-        = mem_zalloc(sizeof(struct object *) * z_info->store_inven_max);
+    struct object **list;
+
+    /* In remote mode, stores are on the TS server — skip C-side store data */
+    {
+        extern bool borg_remote;
+        if (borg_remote) return;
+    }
+
+    list = mem_zalloc(sizeof(struct object *) * z_info->store_inven_max);
 
     /* Scan each store */
     for (store_num = 0; store_num < z_info->store_max; store_num++) {

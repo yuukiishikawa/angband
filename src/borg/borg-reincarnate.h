@@ -29,6 +29,7 @@
  * Allow the borg to play continously.  Reset all values,
  */
 extern void reincarnate_borg(void);
+extern void borg_auto_birth(void);
 
 #endif
 #endif

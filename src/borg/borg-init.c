@@ -34,6 +34,7 @@
 #include "borg-flow.h"
 #include "borg-formulas.h"
 #include "borg-io.h"
+#include "borg-json-log.h"
 #include "borg-item-activation.h"
 #include "borg-item-val.h"
 #include "borg-item-wear.h"
@@ -649,6 +650,9 @@ void borg_init(void)
             borg_init_failure = true;
         }
     }
+
+    /* Initialize JSON logging */
+    borg_json_log_init();
 
     /* Official message */
     if (!borg_init_failure && !warning_given)

@@ -135,7 +135,11 @@ errr borg_what_text(int x, int y, int n, uint8_t *a, char *s)
 /*
  * Log a message to a file
  */
-static void borg_info(const char *what) { }
+static void borg_info(const char *what) {
+    extern bool borg_remote;
+    if (borg_remote)
+        fprintf(stderr, "[BORG] %s\n", what);
+}
 
 
 /*
@@ -424,6 +428,16 @@ void borg_flush(void)
     borg_key_tail         = borg_key_head;
 
     borg_queued_direction = 0;
+}
+
+/*
+ * Get the number of keys in the queue
+ */
+int borg_key_queue_depth(void)
+{
+    int d = borg_key_head - borg_key_tail;
+    if (d < 0) d += KEY_SIZE;
+    return d;
 }
 
 /*

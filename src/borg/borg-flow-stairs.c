@@ -21,6 +21,7 @@
 
 #ifdef ALLOW_BORG
 
+#include "../cave.h"
 #include "borg-flow-kill.h"
 #include "borg-flow.h"
 #include "borg-io.h"
@@ -185,9 +186,13 @@ bool borg_flow_stair_more(int why, bool sneak, bool brave)
 {
     int i;
 
+    extern bool borg_remote;
+
     /* None to flow to */
-    if (!track_more.num)
+    if (!track_more.num) {
+        if (borg_remote) fprintf(stderr, "flow_stair_more: no tracked stairs\n");
         return false;
+    }
 
     /* if there are no down stairs, don't filter use of up stairs */
     if (track_less.num) {
@@ -222,21 +227,93 @@ bool borg_flow_stair_more(int why, bool sneak, bool brave)
     borg_flow_clear();
 
     /* Enqueue useful grids */
+    int enqueued = 0;
     for (i = 0; i < track_more.num; i++) {
         /* Not if a monster is parked on the stair */
-        if (borg_grids[track_more.y[i]][track_more.x[i]].kill)
+        if (borg_grids[track_more.y[i]][track_more.x[i]].kill) {
+            if (borg_remote) fprintf(stderr, "flow_stair_more: stair %d blocked by monster\n", i);
             continue;
+        }
 
         /* Enqueue the grid */
         borg_flow_enqueue_grid(track_more.y[i], track_more.x[i]);
+        enqueued++;
+    }
+
+    if (borg_remote) {
+        static int fsm_dbg = 0;
+        if (fsm_dbg++ < 30) {
+            fprintf(stderr, "flow_stair_more: enqueued=%d stair@(%d,%d) borg@(%d,%d) "
+                "stair_feat=%d cave=%p cave_wid=%d cave_hgt=%d\n",
+                enqueued,
+                track_more.x[0], track_more.y[0],
+                borg.c.x, borg.c.y,
+                borg_grids[track_more.y[0]][track_more.x[0]].feat,
+                (void*)cave, cave ? (int)cave->width : -1, cave ? (int)cave->height : -1);
+        }
     }
 
     /* Spread the flow */
     borg_flow_spread(250, true, false, false, -1, sneak);
 
     /* Attempt to Commit the flow */
-    if (!borg_flow_commit("down-stairs", why))
+    if (!borg_flow_commit("down-stairs", why)) {
+        if (borg_remote) {
+            static int commit_fail = 0;
+            if (commit_fail++ < 3) {
+                int cost = borg_data_cost->data[borg.c.y][borg.c.x];
+                fprintf(stderr, "flow_stair_more: commit FAILED! cost_at_borg=%d (need<250)\n", cost);
+                /* Dump borg_grids feat and flow cost in area between borg and stair */
+                int sy = track_more.y[0], sx = track_more.x[0];
+                int by = borg.c.y, bx = borg.c.x;
+                int miny = (sy < by ? sy : by) - 2;
+                int maxy = (sy > by ? sy : by) + 2;
+                int minx = (sx < bx ? sx : bx) - 2;
+                int maxx = (sx > bx ? sx : bx) + 2;
+                if (miny < 0) miny = 0;
+                if (minx < 0) minx = 0;
+                if (maxy >= AUTO_MAX_Y) maxy = AUTO_MAX_Y - 1;
+                if (maxx >= AUTO_MAX_X) maxx = AUTO_MAX_X - 1;
+                fprintf(stderr, "== FEAT MAP (y=%d..%d, x=%d..%d) ==\n", miny, maxy, minx, maxx);
+                for (int yy = miny; yy <= maxy; yy++) {
+                    fprintf(stderr, "y%02d: ", yy);
+                    for (int xx = minx; xx <= maxx; xx++) {
+                        int f = borg_grids[yy][xx].feat;
+                        char c = '?';
+                        if (f == 0) c = ' ';       /* NONE */
+                        else if (f == 1) c = '.';   /* FLOOR */
+                        else if (f == 2) c = '\'';  /* OPEN */
+                        else if (f == 4) c = '+';   /* CLOSED */
+                        else if (f == 5) c = '<';   /* LESS */
+                        else if (f == 6) c = '>';   /* MORE */
+                        else if (f == 7) c = 'S';   /* SECRET */
+                        else if (f >= 8 && f <= 13) c = '%'; /* RUBBLE/VEIN */
+                        else if (f == 14) c = '#';  /* GRANITE */
+                        else if (f == 15) c = 'P';  /* PERM */
+                        else if (f >= 17 && f <= 24) c = (char)('0' + f - 17 + 1); /* STORE */
+                        else c = '?';
+                        if (yy == by && xx == bx) c = '@';
+                        if (yy == sy && xx == sx) c = '>';
+                        fprintf(stderr, "%c", c);
+                    }
+                    fprintf(stderr, "\n");
+                }
+                fprintf(stderr, "== FLOW COST (same area) ==\n");
+                for (int yy = miny; yy <= maxy; yy++) {
+                    fprintf(stderr, "y%02d: ", yy);
+                    for (int xx = minx; xx <= maxx; xx++) {
+                        int c = borg_data_cost->data[yy][xx];
+                        if (c >= 250)
+                            fprintf(stderr, "--- ");
+                        else
+                            fprintf(stderr, "%3d ", c);
+                    }
+                    fprintf(stderr, "\n");
+                }
+            }
+        }
         return false;
+    }
 
     /* Take one step */
     if (!borg_flow_old(why))

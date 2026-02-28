@@ -45,6 +45,7 @@
 #include "borg-item-use.h"
 #include "borg-item-val.h"
 #include "borg-item-wear.h"
+#include "borg-json-log.h"
 #include "borg-junk.h"
 #include "borg-light.h"
 #include "borg-magic-play.h"
@@ -1238,8 +1239,11 @@ bool borg_think_dungeon(void)
 
     /* redraw the screen if we need to */
     if (my_need_redraw) {
-        borg_note(format("#  Redrawing screen."));
-        do_cmd_redraw();
+        extern bool borg_remote;
+        if (!borg_remote) {
+            borg_note(format("#  Redrawing screen."));
+            do_cmd_redraw();
+        }
         my_need_redraw = false;
     }
 
@@ -1519,8 +1523,10 @@ bool borg_think_dungeon(void)
     borg_notice(true);
 
     /* require light-- Special handle for being out of a light source.*/
-    if (borg_think_dungeon_light())
+    if (borg_think_dungeon_light()) {
+        borg_json_strategy = "Navigation";
         return true;
+    }
 
     /* Decrease the amount of time not allowed to retreat */
     if (borg.no_retreat > 0)
@@ -1537,12 +1543,23 @@ bool borg_think_dungeon(void)
         return true;
 
     /* Try not to die */
-    if (borg_caution())
+    if (borg_caution()) {
+        borg_json_strategy = "Panic";
         return true;
+    }
 
     /*** if returning from dungeon in bad shape...***/
     if (borg.trait[BI_LIGHT] == 0 || borg.trait[BI_ISCUT]
         || borg.trait[BI_ISPOISONED] || borg.trait[BI_FOOD] == 0) {
+        extern bool borg_remote;
+        if (borg_remote) {
+            static int bad_shape = 0;
+            if (bad_shape++ < 20)
+                fprintf(stderr, "think_dungeon: BAD SHAPE block entered! "
+                    "LIGHT=%d CUT=%d POISON=%d FOOD=%d\n",
+                    borg.trait[BI_LIGHT], borg.trait[BI_ISCUT],
+                    borg.trait[BI_ISPOISONED], borg.trait[BI_FOOD]);
+        }
         /* First try to wear something */
         if (borg.trait[BI_LIGHT] == 0) {
             /* attempt to refuel/swap */
@@ -1571,8 +1588,10 @@ bool borg_think_dungeon(void)
 
     /* if I must go to town without delay */
     if ((char *)NULL != borg_must_return_to_town()) {
-        if (borg_leave_level(false))
+        if (borg_leave_level(false)) {
+            borg_json_strategy = "Panic";
             return true;
+        }
     }
 
     /* Learn useful spells immediately */
@@ -1593,8 +1612,10 @@ bool borg_think_dungeon(void)
         return true;
 
     /* Attack monsters */
-    if (borg_attack(false))
+    if (borg_attack(false)) {
+        borg_json_strategy = "Combat";
         return true;
+    }
 
     /* Wear things that need to be worn, but try to avoid swap loops */
     /* if (borg_best_stuff()) return true; */
@@ -1606,12 +1627,16 @@ bool borg_think_dungeon(void)
         return true;
 
     /* Continue flowing towards objects */
-    if (borg_flow_old(GOAL_TAKE))
+    if (borg_flow_old(GOAL_TAKE)) {
+        borg_json_strategy = "Loot";
         return true;
+    }
 
     /* Find a really close object */
-    if (borg_flow_take(true, 5))
+    if (borg_flow_take(true, 5)) {
+        borg_json_strategy = "Loot";
         return true;
+    }
 
     /* Remove "backwards" rings */
     /* Only do this in Stores to avoid loops     if (borg_swap_rings()) return
@@ -1632,21 +1657,35 @@ bool borg_think_dungeon(void)
         return true;
 
     /* Continue flowing to a safe grid on which I may recover */
-    if (borg_flow_old(GOAL_RECOVER))
+    if (borg_flow_old(GOAL_RECOVER)) {
+        borg_json_strategy = "Recovery";
         return true;
+    }
 
     /* Recover from damage */
-    if (borg_recover())
+    if (borg_recover()) {
+        extern bool borg_remote;
+        if (borg_remote) {
+            static int rec_count = 0;
+            if (rec_count++ < 30)
+                fprintf(stderr, "think_dungeon: borg_recover() at L1654 returned true\n");
+        }
+        borg_json_strategy = "Recovery";
         return true;
+    }
 
     /* Attempt to find a grid which is safe and I can recover on it.  This
      * should work closely with borg_recover. */
-    if (borg_flow_recover(50))
+    if (borg_flow_recover(50)) {
+        borg_json_strategy = "Recovery";
         return true;
+    }
 
     /* Perform "cool" perma spells */
-    if (borg_perma_spell())
+    if (borg_perma_spell()) {
+        borg_json_strategy = "Recovery";
         return true;
+    }
 
     /* Try to stick close to stairs if weak */
     if (borg.trait[BI_CLEVEL] < 10 && borg.trait[BI_MAXSP]
@@ -1675,6 +1714,7 @@ bool borg_think_dungeon(void)
                     /* rest here a moment */
                     borg_note("# Resting on stair to gain Mana.");
                     borg_keypress(',');
+                    borg_json_strategy = "Stairs";
                     return true;
                 }
             }
@@ -1698,6 +1738,7 @@ bool borg_think_dungeon(void)
                     /* rest here a moment */
                     borg_note("# Resting on town stair to gain Mana.");
                     borg_keypress(',');
+                    borg_json_strategy = "Stairs";
                     return true;
                 }
             }
@@ -1710,6 +1751,7 @@ bool borg_think_dungeon(void)
         /* Try to find some stairs up */
         if (borg_flow_stair_less(GOAL_FLEE, true)) {
             borg_note("# Looking for stairs. Stair hugging.");
+            borg_json_strategy = "Stairs";
             return true;
         }
     }
@@ -1735,6 +1777,8 @@ bool borg_think_dungeon(void)
 
     /* Return to Stairs, but not use them */
     if (borg.goal.less) {
+        borg_json_strategy = "Stairs";
+
         /* Continue fleeing to stair */
         if (borg_flow_old(GOAL_FLEE))
             return true;
@@ -1752,6 +1796,8 @@ bool borg_think_dungeon(void)
 
     /* Flee the level */
     if (borg.goal.fleeing && !borg.goal.recalling) {
+        borg_json_strategy = "Stairs";
+
         /* Take the next stairs */
         borg.stair_less = borg.stair_more = true;
         if (OPT(player, birth_force_descend))
@@ -1943,6 +1989,7 @@ bool borg_think_dungeon(void)
         if (borg.stair_more && borg_flow_stair_more(GOAL_BORE, true, false)) {
             /* Leave a note */
             borg_note("# Powerdiving.");
+            borg_json_strategy = "Stairs";
             return true;
         }
     }
@@ -1996,18 +2043,26 @@ bool borg_think_dungeon(void)
     }
 
     /* Chase old monsters */
-    if (borg_flow_kill(false, 250))
+    if (borg_flow_kill(false, 250)) {
+        borg_json_strategy = "Combat";
         return true;
+    }
 
     /* Chase old objects */
-    if (borg_flow_take(false, 250))
+    if (borg_flow_take(false, 250)) {
+        borg_json_strategy = "Loot";
         return true;
-    if (borg_flow_vein(false, 250))
+    }
+    if (borg_flow_vein(false, 250)) {
+        borg_json_strategy = "Loot";
         return true;
+    }
 
     /* Explore interesting grids */
-    if (borg_flow_dark(true))
+    if (borg_flow_dark(true)) {
+        borg_json_strategy = "Navigation";
         return true;
+    }
 
     /* Leave the level (if needed) */
     if (borg.trait[BI_GOLD] < borg_cfg[BORG_MONEY_SCUM_AMOUNT]
@@ -2015,21 +2070,31 @@ bool borg_think_dungeon(void)
         && borg.trait[BI_LIGHT]) {
         /* Stay in town and scum for money after shopping */
     } else {
+        extern bool borg_remote;
+        if (borg_remote) {
+            static int ll_count = 0;
+            if (ll_count++ < 20)
+                fprintf(stderr, "think_dungeon: calling borg_leave_level(false)\n");
+        }
         if (borg_leave_level(false))
             return true;
     }
 
     /* Explore interesting grids */
-    if (borg_flow_dark(false))
+    if (borg_flow_dark(false)) {
+        borg_json_strategy = "Navigation";
         return true;
+    }
 
     /*** Deal with shops ***/
 
     /* Visit the shops */
     if (borg_choose_shop()) {
         /* Try and visit a shop, if so desired */
-        if (borg_flow_shop_entry(borg.goal.shop))
+        if (borg_flow_shop_entry(borg.goal.shop)) {
+            borg_json_strategy = "Store";
             return true;
+        }
     }
 
     /*** Leave the Level ***/
@@ -2063,11 +2128,15 @@ bool borg_think_dungeon(void)
         && !borg_cfg[BORG_PLAYS_RISKY]) /* risky borgs are in a hurry */
     {
         /* Stay in town, scum for money now that shopping is done. */
-        if (borg_money_scum())
+        if (borg_money_scum()) {
+            borg_json_strategy = "Store";
             return true;
+        }
     } else {
-        if (borg_leave_level(true))
+        if (borg_leave_level(true)) {
+            borg_json_strategy = "Stairs";
             return true;
+        }
     }
 
     /* Search for secret door via spell before spastic */
@@ -2102,6 +2171,24 @@ bool borg_think_dungeon(void)
     }
 
     /*** Nothing to do ***/
+
+    {
+        extern bool borg_remote;
+        if (borg_remote) {
+            static int twitch_count = 0;
+            if (twitch_count++ < 30)
+                fprintf(stderr, "think_dungeon: REACHED TWITCHY SECTION! "
+                    "borg_t=%d began=%d leaving=%d fleeing=%d "
+                    "recalling=%d track_more=%d track_less=%d "
+                    "CDEPTH=%d CLEVEL=%d GOLD=%d\n",
+                    (int)borg_t, (int)borg_began,
+                    borg.goal.leaving, borg.goal.fleeing,
+                    borg.goal.recalling,
+                    track_more.num, track_less.num,
+                    borg.trait[BI_CDEPTH], borg.trait[BI_CLEVEL],
+                    borg.trait[BI_GOLD]);
+        }
+    }
 
     /* Twitching in town can be fatal.  Really he should not become twitchy
      * but sometimes he cant recall to the dungeon and that may induce the
@@ -2143,8 +2230,10 @@ bool borg_think_dungeon(void)
         /*        goal = 0;*/
 
         /* Done */
-        if (done)
+        if (done) {
+            borg_json_strategy = "Navigation";
             return true;
+        }
     }
 
     /* try phase before boosting bravery further and acting goofy */

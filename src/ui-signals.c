@@ -218,6 +218,14 @@ static void handle_signal_abort(int sig)
 	/* Construct the exit message */
 	(void)strnfmt(msg, sizeof(msg), "Exiting on signal %d!", sig);
 
+#ifdef ALLOW_BORG
+	/* Flush borg JSON log before exit */
+	{
+		extern void borg_json_log_finish(void);
+		borg_json_log_finish();
+	}
+#endif
+
 	/* Nothing to save, just quit */
 	if (!character_generated || character_saved) quit(msg);
 

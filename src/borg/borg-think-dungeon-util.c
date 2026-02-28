@@ -568,6 +568,13 @@ bool borg_think_stair_scum(void)
  */
 static int borg_time_to_stay_on_level(bool bored)
 {
+    /* In remote mode, no food/fuel concern — stay longer to explore/fight */
+    {
+        extern bool borg_remote;
+        if (borg_remote)
+            return 500 + borg.trait[BI_CLEVEL] * 100;
+    }
+
     if (borg.trait[BI_CLEVEL] < 5 || !borg_feeling_stuff) {
 
         /* at very low level, stay less time */

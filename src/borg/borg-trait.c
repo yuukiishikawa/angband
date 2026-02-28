@@ -1766,6 +1766,13 @@ static void borg_notice_equipment(void)
         && borg.trait[BI_LIGHT] <= 0)
         borg.trait[BI_LIGHT] = 1;
 
+    /* In remote mode, the TS server handles light rendering — fake having light */
+    {
+        extern bool borg_remote;
+        if (borg_remote && borg.trait[BI_LIGHT] <= 0)
+            borg.trait[BI_LIGHT] = 1;
+    }
+
 
     if (borg.trait[BI_CRSVULN]) {
         borg.trait[BI_CRSAGRV] = true;

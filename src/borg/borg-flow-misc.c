@@ -776,6 +776,12 @@ bool borg_flow_shop_entry(int i)
     if (borg.trait[BI_CDEPTH])
         return false;
 
+    /* Stores don't work in remote mode (TS server doesn't support them) */
+    {
+        extern bool borg_remote;
+        if (borg_remote) return false;
+    }
+
     /* Obtain the location */
     x = track_shop_x[i];
     y = track_shop_y[i];
