@@ -329,8 +329,19 @@ void borg_flow_spread(int depth, bool optimize, bool avoid, bool tunneling,
             y = y1 + ddy_ddd[i];
 
             /* only on legal grids */
-            if (!square_in_bounds_fully(cave, loc(x, y)))
-                continue;
+            {
+                extern bool borg_remote;
+                if (borg_remote) {
+                    /* In remote mode, use borg_grids bounds (AUTO_MAX)
+                     * since the C cave dimensions don't match the TS game */
+                    if (x < 1 || x >= AUTO_MAX_X - 1 ||
+                        y < 1 || y >= AUTO_MAX_Y - 1)
+                        continue;
+                } else {
+                    if (!square_in_bounds_fully(cave, loc(x, y)))
+                        continue;
+                }
+            }
 
             /* Skip "reached" grids */
             if (borg_data_cost->data[y][x] <= n)
@@ -347,8 +358,17 @@ void borg_flow_spread(int depth, bool optimize, bool avoid, bool tunneling,
                     yy = y + ddy_ddd[ii];
 
                     /* only on legal grids */
-                    if (!square_in_bounds_fully(cave, loc(xx, yy)))
-                        continue;
+                    {
+                        extern bool borg_remote;
+                        if (borg_remote) {
+                            if (xx < 1 || xx >= AUTO_MAX_X - 1 ||
+                                yy < 1 || yy >= AUTO_MAX_Y - 1)
+                                continue;
+                        } else {
+                            if (!square_in_bounds_fully(cave, loc(xx, yy)))
+                                continue;
+                        }
+                    }
 
                     /* Make sure no monster is on this grid, which is
                      * adjacent to the grid on which, I am thinking about
@@ -1189,6 +1209,36 @@ bool borg_flow_old(int why)
             /* Access the location */
             x = borg.c.x + ddx_ddd[b_i];
             y = borg.c.y + ddy_ddd[b_i];
+
+            {
+                extern bool borg_remote;
+                static int flow_dbg = 0;
+                static int last_depth = 0;
+                if (borg.trait[BI_CDEPTH] != last_depth) {
+                    last_depth = borg.trait[BI_CDEPTH];
+                    flow_dbg = 0;  /* Reset debug counter on level change */
+                }
+                if (borg_remote && flow_dbg++ < 120) {
+                    int my_cost = borg_data_flow->data[borg.c.y][borg.c.x];
+                    int tgt_cost = borg_data_flow->data[y][x];
+                    fprintf(stderr, "flow_old: goal=%d borg@(%d,%d) cost=%d "
+                        "-> step(%d,%d) cost=%d feat=%d\n",
+                        why, borg.c.x, borg.c.y, my_cost,
+                        x, y, tgt_cost,
+                        borg_grids[y][x].feat);
+                    /* Also dump all 8 neighbor costs */
+                    fprintf(stderr, "  neighbors: ");
+                    for (int di = 0; di < 8; di++) {
+                        int nx = borg.c.x + ddx_ddd[di];
+                        int ny = borg.c.y + ddy_ddd[di];
+                        fprintf(stderr, "(%d,%d)=%d/f%d ",
+                            nx, ny,
+                            borg_data_flow->data[ny][nx],
+                            borg_grids[ny][nx].feat);
+                    }
+                    fprintf(stderr, "\n");
+                }
+            }
 
             /* Attempt motion */
             if (borg_play_step(y, x))

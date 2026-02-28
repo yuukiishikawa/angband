@@ -1636,4 +1636,58 @@ void do_cmd_borg(void)
     return;
 }
 
+/*
+ * Directly activate the borg for headless mode.
+ * Bypasses interactive prompts (get_check, get_com) that
+ * do_cmd_try_borg/do_cmd_borg use.
+ */
+void borg_headless_activate(void)
+{
+    /* Mark savefile as borg-used */
+    if (!(player->noscore & NOSCORE_BORG))
+        player->noscore |= NOSCORE_BORG;
+
+    /* Set player location from game state */
+    borg.c = player->grid;
+
+    /* Initialize borg if needed */
+    if (!borg_initialized) {
+        borg_init();
+
+        if (borg_init_failure) {
+            borg_initialized = false;
+            borg_free();
+            quit("Borg initialization failed");
+        }
+    }
+
+    /* Start borg (same logic as borg_cmd_start) */
+    borg_reinit_options();
+    borg_clear_best();
+
+    borg_active = true;
+    borg_cancel = false;
+    borg_step = 0;
+
+    if (player->opts.lazymove_delay != 0) {
+        borg_note("# Turning off lazy movement controls");
+        player->opts.lazymove_delay = 0;
+    }
+
+    borg_note("# Installing keypress hook (headless)");
+
+    if (borg_t > 9000)
+        borg_t = 9000;
+
+    /* Signal the event handler to stop injecting SPACE keys.
+     * Must be set BEFORE borg_update_entrypoint so the borg's
+     * user-abort check (Term_inkey with wait=false) finds no keys. */
+    {
+        extern bool borg_headless_ready;
+        borg_headless_ready = true;
+    }
+
+    borg_update_entrypoint(true);
+}
+
 #endif

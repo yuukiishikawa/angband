@@ -131,82 +131,73 @@ const char *borg_race_name(int r_idx)
  */
 static void borg_update_kill_new(int i)
 {
+    extern bool borg_remote;
     int k   = 0;
     int j   = 0;
     int num = 0;
     int pct;
 
     borg_kill *kill            = &borg_kills[i];
-
-    struct monster      *m_ptr = &cave->monsters[kill->m_idx];
     struct monster_race *r_ptr = &r_info[kill->r_idx];
 
-    /* Extract the monster speed */
-    kill->speed = (m_ptr->mspeed);
-
-    /* Extract max hitpoints */
-    /* This is a cheat.  Borg does not look
-     * at the bar at the bottom and frankly that would take a lot of code.
-     * It would involve targeting every monster to read their individual bar.
-     * then keeping track of it.  When the borg has telepathy this would
-     * cripple him down and be tremendously slow.
-     *
-     * This cheat is not too bad.  A human could draw the same info from
-     * from the screen.
-     *
-     * Basically the borg is cheating the real hit points of the monster then
-     * using that information to calculate the estimated hp of the monster.
-     * Its the same basic tactic that we would use.
-     *
-     * Kill->power is used a lot in borg_danger,
-     * for calculating damage from breath attacks.
-     */
-    if (m_ptr->maxhp) {
-        /* Cheat the "percent" of health */
-        pct = 100L * m_ptr->hp / ((m_ptr->maxhp > 1) ? m_ptr->maxhp : 1);
-    } else {
-        pct = 100;
-    }
-
-    /* Compute estimated HP based on number of * in monster health bar */
-    kill->power  = (m_ptr->maxhp * pct) / 100;
-    kill->injury = 100 - pct;
-
-    /* Extract the Level*/
-    kill->level = r_ptr->level;
-
-    /* Some monsters never move */
-    if (rf_has(r_ptr->flags, RF_NEVER_MOVE))
-        kill->awake = true;
-
-    /* Cheat in the game's index of the monster.
-     * Used in tracking monsters
-     */
-    kill->m_idx = square_monster(cave, loc(kill->pos.x, kill->pos.y))->midx;
-
-    /* Is it sleeping */
-    if (m_ptr->m_timed[MON_TMD_SLEEP] == 0)
-        kill->awake = true;
-    else
-        kill->awake = false;
-
-    /* Is it afraid */
-    if (m_ptr->m_timed[MON_TMD_FEAR] == 0)
-        kill->afraid = false;
-    else
-        kill->afraid = true;
-
-    /* Is it confused */
-    if (m_ptr->m_timed[MON_TMD_CONF] == 0)
+    if (borg_remote) {
+        /* Remote mode: no cave monster data available.
+         * Use race defaults for all stats. */
+        kill->speed   = r_ptr->speed;
+        kill->power   = r_ptr->avg_hp;
+        kill->injury  = 0;
+        kill->level   = r_ptr->level;
+        kill->m_idx   = i;  /* Fake index */
+        kill->awake   = true;
+        kill->afraid  = false;
         kill->confused = false;
-    else
-        kill->confused = true;
-
-    /* Is it stunned*/
-    if (m_ptr->m_timed[MON_TMD_STUN] == 0)
         kill->stunned = false;
-    else
-        kill->stunned = true;
+
+        if (rf_has(r_ptr->flags, RF_NEVER_MOVE))
+            kill->awake = true;
+    } else {
+        struct monster *m_ptr = &cave->monsters[kill->m_idx];
+
+        /* Extract the monster speed */
+        kill->speed = (m_ptr->mspeed);
+
+        /* Extract max hitpoints — cheat from cave data */
+        if (m_ptr->maxhp) {
+            pct = 100L * m_ptr->hp / ((m_ptr->maxhp > 1) ? m_ptr->maxhp : 1);
+        } else {
+            pct = 100;
+        }
+
+        kill->power  = (m_ptr->maxhp * pct) / 100;
+        kill->injury = 100 - pct;
+
+        kill->level = r_ptr->level;
+
+        if (rf_has(r_ptr->flags, RF_NEVER_MOVE))
+            kill->awake = true;
+
+        kill->m_idx = square_monster(cave, loc(kill->pos.x, kill->pos.y))->midx;
+
+        if (m_ptr->m_timed[MON_TMD_SLEEP] == 0)
+            kill->awake = true;
+        else
+            kill->awake = false;
+
+        if (m_ptr->m_timed[MON_TMD_FEAR] == 0)
+            kill->afraid = false;
+        else
+            kill->afraid = true;
+
+        if (m_ptr->m_timed[MON_TMD_CONF] == 0)
+            kill->confused = false;
+        else
+            kill->confused = true;
+
+        if (m_ptr->m_timed[MON_TMD_STUN] == 0)
+            kill->stunned = false;
+        else
+            kill->stunned = true;
+    }
 
     /* Preload the spells from the race into this individual monster */
     kill->spell_flags[0] = r_ptr->spell_flags[0];
@@ -266,76 +257,59 @@ static void borg_update_kill_new(int i)
 static void borg_update_kill_old(int i)
 {
     int t, e;
+    extern bool borg_remote;
     int k   = 0;
     int num = 0;
     int j   = 0;
     int pct;
 
     borg_kill *kill       = &borg_kills[i];
-
-    struct monster *m_ptr = square_monster(cave, loc(kill->pos.x, kill->pos.y));
     struct monster_race *r_ptr = &r_info[kill->r_idx];
 
-    /* Extract max hitpoints */
-    /* Extract actual Hitpoints, this is a cheat.  Borg does not look
-     * at the bar at the bottom and frankly that would take a lot of code.
-     * It would involve targeting every monster to read their individual bar.
-     * then keeping track of it.  When the borg has telepathy this would
-     * cripple him down and be tremendously slow.
-     *
-     * This cheat is not too bad.  A human could draw the same info from
-     * from the screen.
-     *
-     * Basically the borg is cheating the real hit points of the monster then
-     * using that information to calculate the estimated hp of the monster.
-     * It's the same basic tactics that we would use.
-     *
-     * Kill->power is used a lot in borg_danger,
-     * for calculating damage from breath attacks.
-     */
-
-    if (m_ptr->maxhp) {
-        /* Cheat the "percent" of health */
-        pct = 100L * m_ptr->hp / ((m_ptr->maxhp > 1) ? m_ptr->maxhp : 1);
+    if (borg_remote) {
+        /* Remote mode: use race defaults, keep existing state */
+        kill->power   = r_ptr->avg_hp;
+        kill->injury  = 0;
+        kill->speed   = r_ptr->speed;
     } else {
-        pct = 100;
+        struct monster *m_ptr = square_monster(cave, loc(kill->pos.x, kill->pos.y));
+
+        if (m_ptr && m_ptr->maxhp) {
+            pct = 100L * m_ptr->hp / ((m_ptr->maxhp > 1) ? m_ptr->maxhp : 1);
+        } else {
+            pct = 100;
+        }
+
+        kill->power  = m_ptr ? (m_ptr->maxhp * pct) / 100 : r_ptr->avg_hp;
+        kill->injury = 100 - pct;
+
+        if (m_ptr) {
+            if (m_ptr->m_timed[MON_TMD_SLEEP] == 0)
+                kill->awake = true;
+            else
+                kill->awake = false;
+
+            if (m_ptr->m_timed[MON_TMD_FEAR] == 0)
+                kill->afraid = false;
+            else
+                kill->afraid = true;
+
+            if (m_ptr->m_timed[MON_TMD_CONF] == 0)
+                kill->confused = false;
+            else
+                kill->confused = true;
+
+            if (m_ptr->m_timed[MON_TMD_STUN] == 0)
+                kill->stunned = false;
+            else
+                kill->stunned = true;
+
+            kill->m_idx = square_monster(cave, loc(kill->pos.x, kill->pos.y))->midx;
+            kill->speed = (m_ptr->mspeed);
+        } else {
+            kill->speed = r_ptr->speed;
+        }
     }
-
-    /* Compute estimated HP based on number of * in monster health bar */
-    kill->power  = (m_ptr->maxhp * pct) / 100;
-    kill->injury = 100 - pct;
-
-    /* Is it sleeping */
-    if (m_ptr->m_timed[MON_TMD_SLEEP] == 0)
-        kill->awake = true;
-    else
-        kill->awake = false;
-
-    /* Is it afraid */
-    if (m_ptr->m_timed[MON_TMD_FEAR] == 0)
-        kill->afraid = false;
-    else
-        kill->afraid = true;
-
-    /* Is it confused */
-    if (m_ptr->m_timed[MON_TMD_CONF] == 0)
-        kill->confused = false;
-    else
-        kill->confused = true;
-
-    /* Is it stunned*/
-    if (m_ptr->m_timed[MON_TMD_STUN] == 0)
-        kill->stunned = false;
-    else
-        kill->stunned = true;
-
-    /* Cheat in the game's index of the monster.
-     * Used in tracking monsters
-     */
-    kill->m_idx = square_monster(cave, loc(kill->pos.x, kill->pos.y))->midx;
-
-    /* Extract the monster speed */
-    kill->speed = (m_ptr->mspeed);
 
     /* Player energy per game turn */
     e = extract_energy[borg.trait[BI_SPEED]];
@@ -727,6 +701,7 @@ void borg_follow_kill(int i)
  */
 static int borg_new_kill(unsigned int r_idx, int y, int x)
 {
+    extern bool borg_remote;
     int i, n = -1;
 
     borg_kill           *kill;
@@ -760,9 +735,13 @@ static int borg_new_kill(unsigned int r_idx, int y, int x)
     }
 
     /* it might be that it can't be found */
-    m_ptr = square_monster(cave, loc(x, y));
-    if (!m_ptr)
-        return -1;
+    if (!borg_remote) {
+        m_ptr = square_monster(cave, loc(x, y));
+        if (!m_ptr)
+            return -1;
+    } else {
+        m_ptr = NULL;  /* No cave monster in remote mode */
+    }
 
     /* Count the monsters */
     borg_kills_cnt++;
@@ -780,7 +759,7 @@ static int borg_new_kill(unsigned int r_idx, int y, int x)
     kill->oy = kill->pos.y = y;
 
     /* Games Index of the monster */
-    kill->m_idx = m_ptr->midx;
+    kill->m_idx = m_ptr ? m_ptr->midx : n;
 
     /* Update the grids */
     borg_grids[kill->pos.y][kill->pos.x].kill = n;
@@ -911,6 +890,34 @@ static int borg_new_kill(unsigned int r_idx, int y, int x)
 static unsigned int borg_guess_race(
     uint8_t a, wchar_t c, bool multi, int y, int x)
 {
+    extern bool borg_remote;
+
+    if (borg_remote) {
+        /* In remote mode, cave has no monsters.  Identify by matching
+         * the display character and attribute against r_info[]. */
+        unsigned int best = 0;
+        for (unsigned int ri = 1; ri < (unsigned int)z_info->r_max; ri++) {
+            struct monster_race *r = &r_info[ri];
+            if (!r->name) continue;
+            if (r->d_char == c && r->d_attr == a) {
+                best = ri;
+                break;  /* First match is fine */
+            }
+        }
+        if (!best) {
+            /* Try matching char only (color might differ due to status) */
+            for (unsigned int ri = 1; ri < (unsigned int)z_info->r_max; ri++) {
+                struct monster_race *r = &r_info[ri];
+                if (!r->name) continue;
+                if (r->d_char == c) {
+                    best = ri;
+                    break;
+                }
+            }
+        }
+        return best;
+    }
+
     /*  ok, this is an real cheat.  he ought to use the look command
      * in order to correctly id the monster.  but i am passing that up for
      * the sake of speed
@@ -970,6 +977,7 @@ bool observe_kill_diff(int y, int x, uint8_t a, wchar_t c)
  */
 bool observe_kill_move(int y, int x, int d, uint8_t a, wchar_t c, bool flag)
 {
+    extern bool borg_remote;
     int                  i, z, ox, oy;
     unsigned int         r_idx;
     borg_kill           *kill;
@@ -1009,8 +1017,11 @@ bool observe_kill_move(int y, int x, int d, uint8_t a, wchar_t c, bool flag)
             continue;
 
         /* Verify that we are looking at the right one */
-        if (kill->m_idx != square_monster(cave, loc(x, y))->midx)
-            continue;
+        if (!borg_remote) {
+            struct monster *sq_m = square_monster(cave, loc(x, y));
+            if (!sq_m || kill->m_idx != sq_m->midx)
+                continue;
+        }
 
         /* Verify "reasonable" motion, if allowed */
         if (!flag && (z > (kill->moves / 10) + 1))
@@ -2895,6 +2906,7 @@ void borg_near_monster_type(int dist)
  */
 bool borg_shoot_scoot_safe(int emergency, int turns, int b_p)
 {
+    extern bool borg_remote;
     int n, k, i, d, x, y, p, u;
 
     int dis               = 10;
@@ -2921,7 +2933,7 @@ bool borg_shoot_scoot_safe(int emergency, int turns, int b_p)
 
     /* Cheat the floor grid */
     /* Not if in a vault since it throws us out of the vault */
-    if (square_isvault(cave, borg.c))
+    if (!borg_remote && square_isvault(cave, borg.c))
         return false;
 
     /*** Need Missiles or cheap spells ***/

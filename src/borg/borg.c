@@ -21,12 +21,15 @@
 
 #ifdef ALLOW_BORG
 
+#include "../cave.h"
 #include "../game-world.h"
 #include "../ui-input.h"
 #include "../ui-keymap.h"
 
+#include "borg-cave.h"
 #include "borg-init.h"
 #include "borg-io.h"
+#include "borg-json-log.h"
 #include "borg-log.h"
 #include "borg-messages-react.h"
 #include "borg-messages.h"
@@ -323,6 +326,9 @@ static struct keypress internal_borg_inkey(int flush_first)
 
     /* Mega-Hack -- Handle death */
     if (player->is_dead) {
+        /* Flush JSON log before death processing */
+        borg_json_log_finish();
+
 #ifndef BABLOS
         /* Print the map */
         if (borg.trait[BI_CLEVEL] >= borg_cfg[BORG_DUMP_LEVEL]
@@ -486,6 +492,9 @@ static struct keypress internal_borg_inkey(int flush_first)
     while (!borg_think()) /* loop */
         ;
 
+    /* Record this turn for JSON analysis log */
+    borg_json_log_turn();
+
     /* Update the status screen */
     borg_status();
 
@@ -515,4 +524,211 @@ static struct keypress internal_borg_inkey(int flush_first)
     key.code = ESCAPE;
     return key;
 }
+
+/*
+ * Remote borg main loop.
+ *
+ * Instead of hooking into the C game loop via inkey_hack, this function
+ * directly:
+ *   1. Receives a screen frame from the TS server → populates Term->scr
+ *   2. Parses messages from row 0
+ *   3. Runs borg_think() → queues keypresses
+ *   4. Sends queued keys back to the TS server via TCP
+ *   5. Records JSON telemetry
+ *
+ * Called from play_game() when borg_remote is true.
+ */
+void borg_remote_loop(void)
+{
+    extern bool borg_remote;
+    extern int  borg_remote_sock;
+    extern int  recv_screen_frame(int sock);
+    extern void borg_remote_send_key(int sock, keycode_t key, int mods);
+
+    keycode_t borg_ch;
+    uint8_t t_a;
+    char buffer[1024];
+    char *buf;
+
+    borg_note("# Remote borg loop starting");
+    fprintf(stderr, "Remote borg: loop starting\n");
+
+    int remote_turn = 0;
+    int prev_x = -1, prev_y = -1;
+    int stuck_count = 0;
+
+    while (1) {
+        /* 1. Receive screen frame from TS server */
+        if (remote_turn < 5)
+            fprintf(stderr, "Remote borg: waiting for frame %d\n", remote_turn);
+        if (recv_screen_frame(borg_remote_sock) < 0) {
+            borg_note("# Remote: connection lost or game over");
+            fprintf(stderr, "Remote borg: recv_screen_frame failed at turn %d\n", remote_turn);
+            break;
+        }
+        if (remote_turn < 5)
+            fprintf(stderr, "Remote borg: got frame %d, dead=%d\n", remote_turn, player->is_dead);
+
+        /* Check for death via STAT update */
+        if (player->is_dead) {
+            borg_note("# Remote: player is dead");
+            fprintf(stderr, "Remote borg: player dead\n");
+            borg_json_log_finish();
+            break;
+        }
+
+        /* 2. Sync Term scr→old so borg_what_text reads fresh data.
+         * In headless mode, Term_fresh() copies scr to old.
+         * For remote mode we need scr to stay as-is for reading. */
+        Term_fresh();
+
+        /* 3. Parse message line (row 0) — same as internal_borg_inkey */
+        buf = buffer;
+        borg_what_text(0, 0, ((Term->wid - 1) / (tile_width)), &t_a, buffer);
+        buf = borg_trim(buf);
+
+        if (remote_turn < 5)
+            fprintf(stderr, "Remote borg: msg row=[%s] attr=%d\n", buf, t_a);
+
+        /* If there's text with non-DARK attribute, parse as message */
+        if (t_a != COLOUR_DARK &&
+            (buf[0] != ' ' || buf[1] != ' ' || buf[2] != ' ' || buf[3] != ' ')) {
+            int k = strlen(buf);
+            while (k > 0 && buf[k - 1] == ' ') k--;
+            buf[k] = '\0';
+            /* Log ALL non-empty messages */
+            fprintf(stderr, "Remote borg[%d]: MSG [%s] attr=%d\n",
+                    remote_turn, buf, t_a);
+            borg_parse(buf);
+        }
+
+        /* Detect dungeon level change: if player position (set by STAT
+         * in recv_screen_frame) is outside the C cave bounds, replace
+         * cave with a dummy cave large enough to prevent assertion
+         * failures in square_* functions.  The remote borg doesn't use
+         * cave data (it reads borg_grids from the screen), but many
+         * subroutines call square_isvault, no_light, etc. which access
+         * cave internally.  We check player->grid (from STAT) rather
+         * than borg.c (from screen '@' detection) because STAT is
+         * already updated but borg.c hasn't been refreshed yet. */
+        if (cave && (player->grid.y >= (int)cave->height ||
+                     player->grid.x >= (int)cave->width ||
+                     player->grid.y < 0 || player->grid.x < 0)) {
+            fprintf(stderr, "Remote borg[%d]: player grid (%d,%d) out of cave bounds (%d x %d), "
+                    "replacing cave with dummy %dx%d\n",
+                    remote_turn, player->grid.x, player->grid.y,
+                    cave->width, cave->height,
+                    DUNGEON_WID, DUNGEON_HGT);
+            cave_free(cave);
+            cave = cave_new(DUNGEON_HGT, DUNGEON_WID);
+        }
+
+        /* Flush message parser */
+        borg_parse(NULL);
+        borg_dont_react = false;
+
+        /* 3b. Stale flow detection: if position didn't change after
+         * sending a movement key, clear the cached flow so borg_think
+         * recalculates a new path. */
+        if (prev_x >= 0 && borg.c.x == prev_x && borg.c.y == prev_y) {
+            stuck_count++;
+            if (stuck_count >= 3 && borg.goal.type != 0) {
+                fprintf(stderr, "Remote borg[%d]: STUCK at (%d,%d) for %d turns, clearing goal type %d\n",
+                        remote_turn, borg.c.x, borg.c.y, stuck_count, borg.goal.type);
+                borg.goal.type = 0;
+                stuck_count = 0;
+            }
+        } else {
+            stuck_count = 0;
+        }
+
+        /* 4. Send ONE queued key from previous think.
+         * The TS server sends a frame after every key (echo frame for
+         * partial commands, REFRESH frame for complete commands), so
+         * we maintain strict one-key-per-frame synchronization. */
+        borg_ch = borg_inkey(true);
+        if (borg_ch) {
+            if (remote_turn < 500 || borg.trait[BI_CDEPTH] > 0)
+                fprintf(stderr, "Remote borg[%d]: KEY %d '%c' pos(%d,%d) depth=%d\n",
+                        remote_turn, borg_ch,
+                        (borg_ch >= 32 && borg_ch < 127) ? (char)borg_ch : '?',
+                        borg.c.x, borg.c.y, borg.trait[BI_CDEPTH]);
+            prev_x = borg.c.x;
+            prev_y = borg.c.y;
+            borg_remote_send_key(borg_remote_sock, borg_ch, 0);
+            remote_turn++;
+            continue;
+        }
+
+        /* 4b. Check for queued direction (from borg_queue_direction).
+         * Commands like 'o' (open) enqueue the command key but save
+         * the direction in a separate variable.  In normal mode, the
+         * game's "Direction?" prompt triggers borg_messages_react to
+         * supply it.  In remote mode, we handle it explicitly here. */
+        {
+            keycode_t qdir = borg_get_queued_direction();
+            if (qdir) {
+                if (remote_turn < 500 || borg.trait[BI_CDEPTH] > 0)
+                    fprintf(stderr, "Remote borg[%d]: QDIR %d '%c' pos(%d,%d)\n",
+                            remote_turn, qdir,
+                            (qdir >= 32 && qdir < 127) ? (char)qdir : '?',
+                            borg.c.x, borg.c.y);
+                prev_x = borg.c.x;
+                prev_y = borg.c.y;
+                borg_remote_send_key(borg_remote_sock, qdir, 0);
+                remote_turn++;
+                continue;
+            }
+        }
+
+        /* 5. Run borg AI — uses borg's local RNG */
+        if (remote_turn < 500 || borg.trait[BI_CDEPTH] > 0)
+            fprintf(stderr, "Remote borg: calling borg_think() [turn %d] "
+                    "player_grid=(%d,%d) cave_dim=(%dx%d) depth=%d\n",
+                    remote_turn,
+                    player->grid.x, player->grid.y,
+                    cave ? cave->width : 0, cave ? cave->height : 0,
+                    player->depth);
+
+        borg_rand_quick = Rand_quick;
+        borg_rand_value = Rand_value;
+        Rand_quick = true;
+        Rand_value = borg_rand_local;
+
+        while (!borg_think())
+            ;
+
+        borg_rand_local = Rand_value;
+        Rand_quick = borg_rand_quick;
+        Rand_value = borg_rand_value;
+
+        if (borg.trait[BI_CDEPTH] > 0)
+            fprintf(stderr, "Remote borg[%d]: after think: queue=%d goal=%d\n",
+                    remote_turn, borg_key_queue_depth(), borg.goal.type);
+
+        /* 6. JSON telemetry */
+        borg_json_log_turn();
+
+        /* 7. Send first queued key immediately after think.
+         * Remaining keys stay in queue for step 4 on subsequent
+         * iterations (one-key-per-frame synchronization). */
+        borg_ch = borg_inkey(true);
+        if (borg_ch) {
+            if (remote_turn < 500 || borg.trait[BI_CDEPTH] > 0)
+                fprintf(stderr, "Remote borg[%d]: KEY %d '%c' pos(%d,%d) depth=%d goal=%d q=%d [post-think]\n",
+                        remote_turn, borg_ch,
+                        (borg_ch >= 32 && borg_ch < 127) ? (char)borg_ch : '?',
+                        borg.c.x, borg.c.y, borg.trait[BI_CDEPTH],
+                        borg.goal.type, borg_key_queue_depth());
+            prev_x = borg.c.x;
+            prev_y = borg.c.y;
+            borg_remote_send_key(borg_remote_sock, borg_ch, 0);
+            remote_turn++;
+        }
+    }
+
+    borg_json_log_finish();
+    borg_note("# Remote borg loop ended");
+}
+
 #endif

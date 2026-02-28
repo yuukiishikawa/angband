@@ -2824,15 +2824,16 @@ int borg_danger_one_kill(
  */
 int borg_danger(int y, int x, int c, bool average, bool full_damage)
 {
+    extern bool borg_remote;
     int i, p = 0;
 
     struct loc l = loc(x, y);
-    if (!square_in_bounds(cave, l))
+    if (!borg_remote && !square_in_bounds(cave, l))
         return 2000;
 
     /* Base danger (from regional fear) but not within a vault.  Cheating the
      * floor grid */
-    if (!square_isvault(cave, l) && borg.trait[BI_CDEPTH] <= 80) {
+    if ((borg_remote || !square_isvault(cave, l)) && borg.trait[BI_CDEPTH] <= 80) {
         p += borg_fear_region[y / 11][x / 11] * c;
     }
 
@@ -2845,7 +2846,7 @@ int borg_danger(int y, int x, int c, bool average, bool full_damage)
      * this panel for too long, or monster's in a vault.  The fear_monsters[][]
      * can induce some bouncy behavior.
      */
-    if (borg.time_this_panel <= 200 && !square_isvault(cave, loc(x, y)))
+    if (borg.time_this_panel <= 200 && (borg_remote || !square_isvault(cave, loc(x, y))))
         p += borg_fear_monsters[y][x] * c;
 
     full_damage = true;

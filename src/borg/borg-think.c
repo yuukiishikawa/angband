@@ -28,6 +28,7 @@
 #include "borg-inventory.h"
 #include "borg-io.h"
 #include "borg-item-wear.h"
+#include "borg-json-log.h"
 #include "borg-log.h"
 #include "borg-magic.h"
 #include "borg-power.h"
@@ -65,6 +66,9 @@ bool    borg_do_spell     = true; /* Acquire "spell" info */
  */
 void borg_oops(const char *what)
 {
+    /* Flush JSON log before stopping */
+    borg_json_log_finish();
+
     /* Stop processing */
     borg_active = false;
 

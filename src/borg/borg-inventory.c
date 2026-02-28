@@ -173,6 +173,12 @@ void borg_cheat_equip(void)
 {
 	char buf[256];
 
+	/* In remote mode, skip stale C equipment — already cleared in cheat_inven */
+	{
+		extern bool borg_remote;
+		if (borg_remote) return;
+	}
+
 	/* Extract the equipment */
 	int count = player->body.count + z_info->pack_size;
 	for (int j = 0, i = z_info->pack_size; i < count; i++, j++) {
@@ -216,6 +222,61 @@ void borg_cheat_inven(void)
     int i;
 
     char buf[256];
+
+    /* In remote mode, populate borg_items[] from INVEN protocol data
+     * received in recv_screen_frame() (main-borg.c). */
+    {
+        extern bool borg_remote;
+        if (borg_remote) {
+            /* Remote inventory buffer defined in main-borg.c */
+            struct remote_inven_entry {
+                int slot;
+                int tval, sval, qty;
+                int to_h, to_d, to_a;
+                int dd, ds, ac, weight;
+                char name[80];
+                bool valid;
+            };
+            extern struct remote_inven_entry borg_remote_inven[];
+            extern int borg_remote_inven_count;
+
+            /* Clear all items */
+            for (i = 0; i < QUIVER_END; i++)
+                memset(&borg_items[i], 0, sizeof(borg_item));
+
+            /* Populate from remote data */
+            for (i = 0; i < borg_remote_inven_count; i++) {
+                struct remote_inven_entry *e = &borg_remote_inven[i];
+                if (!e->valid) continue;
+                if (e->slot < 0 || e->slot >= QUIVER_END) continue;
+
+                borg_item *item = &borg_items[e->slot];
+                item->iqty   = e->qty;
+                item->tval   = e->tval;
+                item->sval   = e->sval;
+                item->to_h   = e->to_h;
+                item->to_d   = e->to_d;
+                item->to_a   = e->to_a;
+                item->dd     = e->dd;
+                item->ds     = e->ds;
+                item->ac     = e->ac;
+                item->weight = e->weight;
+
+                /* Find kind index from tval+sval */
+                for (int k = 1; k < z_info->k_max; k++) {
+                    if (k_info[k].tval == e->tval && k_info[k].sval == e->sval) {
+                        item->kind = k;
+                        item->aware = true;
+                        item->ident = true;
+                        break;
+                    }
+                }
+
+                my_strcpy(item->desc, e->name, sizeof(item->desc));
+            }
+            return;
+        }
+    }
 
     /* Extract the inventory */
     for (i = 0; i < z_info->pack_size; i++) {

@@ -693,12 +693,17 @@ const char *borg_prepared(int depth)
  */
 const char *borg_restock(int depth)
 {
+    /* In remote mode, stores don't work — never claim we need restock */
+    {
+        extern bool borg_remote;
+        if (borg_remote) return ((char *)NULL);
+    }
 
     /* We are now looking at our preparedness */
     if (-1 == borg.ready_morgoth)
         borg.ready_morgoth = 0;
 
-    if (borg_cfg[BORG_USES_DYNAMIC_CALCS]) 
+    if (borg_cfg[BORG_USES_DYNAMIC_CALCS])
         return borg_restock_dynamic(depth);
 
     /*** Level 1 ***/

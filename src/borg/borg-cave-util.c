@@ -29,7 +29,15 @@
 /* Is this grid a grid which can be stepped on or can I see through it */
 bool borg_cave_floor_bold(int y, int X)
 {
-    if (square_in_bounds_fully(cave, loc(X, y))) {
+    extern bool borg_remote;
+    bool in_bounds;
+    if (borg_remote)
+        in_bounds = (X >= 1 && X < AUTO_MAX_X - 1 &&
+                     y >= 1 && y < AUTO_MAX_Y - 1);
+    else
+        in_bounds = square_in_bounds_fully(cave, loc(X, y));
+
+    if (in_bounds) {
         if ((borg_grids[y][X].feat == FEAT_FLOOR) || (borg_grids[y][X].trap)
             || (borg_grids[y][X].feat == FEAT_LESS)
             || (borg_grids[y][X].feat == FEAT_MORE)

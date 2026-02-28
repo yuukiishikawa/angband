@@ -798,6 +798,7 @@ static bool borg_heal(int danger)
  */
 bool borg_caution(void)
 {
+    extern bool borg_remote;
     int  j, pos_danger;
     bool borg_surround = false;
     bool nasty         = false;
@@ -1429,7 +1430,7 @@ bool borg_caution(void)
     if (((pos_danger > avoidance / 3 && !nasty && !borg.no_retreat)
             || (borg_surround && pos_danger != 0))
         && !borg_morgoth_position && (borg_t - borg_t_antisummon >= 50)
-        && !borg.trait[BI_ISCONFUSED] && !square_isvault(cave, borg.c)
+        && !borg.trait[BI_ISCONFUSED] && (borg_remote || !square_isvault(cave, borg.c))
         && borg.trait[BI_CURHP] < 500) {
         int d, b_d = -1;
         int r, b_r = -1;
@@ -1673,7 +1674,7 @@ bool borg_caution(void)
     if (((pos_danger > (avoidance * 4 / 10) && !nasty && !borg.no_retreat)
             || (borg_surround && pos_danger != 0))
         && !borg_morgoth_position && (borg_t - borg_t_antisummon >= 50)
-        && !borg.trait[BI_ISCONFUSED] && !square_isvault(cave, borg.c)
+        && !borg.trait[BI_ISCONFUSED] && (borg_remote || !square_isvault(cave, borg.c))
         && borg.trait[BI_CURHP] < 500) {
         int  i = -1, b_i = -1;
         int  k = -1, b_k = -1;

@@ -25,6 +25,7 @@ option(SUPPORT_BUNDLED_PNG "Use bundled Windows PNG+Zlib (32-bit x86 only)" OFF)
 option(SUPPORT_STATIC_LINKING "Enable static linking where possible" OFF)
 option(SUPPORT_STATS_BACKEND "Enable backend support for statistics and related debugging commands.  Implied by SUPPORT_STATS_FRONTEND." OFF)
 option(SUPPORT_BORG "Support for Borg." ON)
+option(SUPPORT_BORG_FRONTEND "Support for headless borg front end." OFF)
 option(SUPPORT_BORG_HIGH_SCORES "Borg characters allowed in high scores." OFF)
 
 # By default, generate a self-contained build left where the build was run.
@@ -351,6 +352,7 @@ add_library(OurCoreLib OBJECT
         src/borg/borg-item-val.c
         src/borg/borg-item-wear.c
         src/borg/borg-item.c
+        src/borg/borg-json-log.c
         src/borg/borg-junk.c
         src/borg/borg-light.c
         src/borg/borg-log.c
@@ -428,6 +430,7 @@ add_executable(OurExecutable
         $<$<BOOL:${SUPPORT_STATS_FRONTEND}>:src/main-stats.c>
         $<$<BOOL:${SUPPORT_STATS_FRONTEND}>:src/stats/db.c>
         $<$<BOOL:${SUPPORT_TEST_FRONTEND}>:src/main-test.c>
+        $<$<BOOL:${SUPPORT_BORG_FRONTEND}>:src/main-borg.c>
         $<$<NOT:$<BOOL:${SUPPORT_WINDOWS_FRONTEND}>>:src/main.c>
 )
 
@@ -511,6 +514,11 @@ endif()
 if(SUPPORT_TEST_FRONTEND)
     include(src/cmake/macros/TEST_Frontend.cmake)
     configure_test_frontend(OurExecutable)
+endif()
+
+if(SUPPORT_BORG_FRONTEND)
+    target_compile_definitions(OurExecutable PRIVATE -D USE_BORG_FRONTEND)
+    message(STATUS "Support for headless borg front end - Ready")
 endif()
 
 if(SUPPORT_COVERAGE)

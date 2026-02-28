@@ -64,6 +64,12 @@
 #include "z-util.h"
 #include "z-virt.h"
 
+#include "main.h"
+
+#ifdef ALLOW_BORG
+#include "borg/borg-reincarnate.h"
+#endif
+
 
 struct savefile_getter_impl {
 	ang_dir *d;
@@ -718,8 +724,15 @@ static bool start_game(bool new_game)
 
 	/* No living character loaded */
 	if (player->is_dead || new_game) {
-		character_generated = false;
-		textui_do_birth();
+#ifdef ALLOW_BORG
+		if (borg_headless) {
+			borg_auto_birth();
+		} else
+#endif
+		{
+			character_generated = false;
+			textui_do_birth();
+		}
 	} else {
 		/*
 		 * Bring the stock curse objects up-to-date with what the
@@ -933,6 +946,27 @@ void play_game(enum game_mode_type mode)
 			quit("Invalid game mode in play_game()");
 			break;
 		}
+
+		/* In headless borg mode, activate the borg directly.
+		 * This bypasses the interactive ^Z menu and confirmation. */
+#ifdef ALLOW_BORG
+		if (borg_headless) {
+			extern void borg_headless_activate(void);
+			borg_headless_activate();
+		}
+
+		/* Remote borg mode: skip the C game loop entirely.
+		 * Screen data comes from the TS server via TCP. */
+		{
+			extern bool borg_remote;
+			if (borg_remote) {
+				extern void borg_remote_loop(void);
+				borg_remote_loop();
+				quit("Remote borg session ended");
+				break;
+			}
+		}
+#endif
 
 		/* Get commands from the user, then process the game world
 		 * until the command queue is empty and a new player command

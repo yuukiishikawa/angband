@@ -22,6 +22,7 @@
 #ifdef ALLOW_BORG
 
 #include "../cave.h"
+#include "../main.h"
 #include "../trap.h"
 #include "../ui-term.h"
 
@@ -250,12 +251,393 @@ static void borg_forget_map(void)
  * which was thought to be something else, like an unknown grid.
  *
  */
+/*
+ * Remote-mode map update: reads from Term->scr instead of map_info().
+ * Maps screen characters/colors to FEAT_* values.
+ * Called instead of the normal borg_update_map() when borg_remote is true.
+ */
+static void borg_update_map_remote(void)
+{
+    int i, x, y, dx, dy;
+    borg_grid *ag;
+
+    /* TS renderer has no sidebar: map at col 0, rows 1-21 (21 rows).
+     * Don't use COL_MAP/ROW_MAP/SCREEN_HGT/SCREEN_WID as they depend
+     * on Term->sidebar_mode which may not match the TS layout. */
+    const int remote_col_map = 0;   /* Map starts at screen col 0 */
+    const int remote_row_map = 1;   /* Map starts at screen row 1 */
+    const int remote_map_cols = 80; /* Full terminal width */
+    const int remote_map_rows = 21; /* Rows 1-21 (row 22-23 = status) */
+
+    {
+        static int map_dbg = 0;
+        if (map_dbg++ < 3)
+            fprintf(stderr, "MAP_REMOTE: w_x=%d w_y=%d col=%d row=%d "
+                "cols=%d rows=%d\n",
+                w_x, w_y, remote_col_map, remote_row_map,
+                remote_map_cols, remote_map_rows);
+    }
+
+    for (dy = 0; dy < remote_map_rows; dy++) {
+        for (dx = 0; dx < remote_map_cols; dx++) {
+            bool old_wall;
+            bool new_wall;
+
+            /* Cave coordinates */
+            x = w_x + dx;
+            y = w_y + dy;
+
+            /* Bounds check for borg_grids (max AUTO_MAX_X x AUTO_MAX_Y) */
+            if (x < 0 || x >= AUTO_MAX_X || y < 0 || y >= AUTO_MAX_Y)
+                continue;
+
+            /* Screen coordinates */
+            int scr_x = remote_col_map + dx;
+            int scr_y = remote_row_map + dy;
+
+            if (scr_x >= 80 || scr_y >= 24) continue;
+            if (!Term || !Term->scr) continue;
+
+            wchar_t ch = Term->scr->c[scr_y][scr_x];
+            int attr = Term->scr->a[scr_y][scr_x] & 0x0f;
+
+            ag = &borg_grids[y][x];
+
+            /* Save old wall state */
+            old_wall = !borg_cave_floor_grid(ag);
+
+            /* Mark on-screen */
+            ag->info |= BORG_OKAY;
+
+            /* Map screen character to feature type */
+            int feat = FEAT_NONE;
+            bool is_player = false;
+            bool is_monster = false;
+            bool is_object = false;
+            uint8_t monster_attr = 0;
+            wchar_t monster_char = 0;
+            uint8_t object_attr = 0;
+            wchar_t object_char = 0;
+
+            switch ((char)ch) {
+            case '.':
+                feat = FEAT_FLOOR;
+                break;
+            case '#':
+                /* Wall type depends on color */
+                if (attr == 1) /* COLOUR_WHITE */
+                    feat = FEAT_PERM;
+                else
+                    feat = FEAT_GRANITE;
+                break;
+            case '+':
+                feat = FEAT_CLOSED;
+                break;
+            case '\'':
+                feat = FEAT_OPEN;
+                break;
+            case '<':
+                feat = FEAT_LESS;
+                break;
+            case '>':
+                feat = FEAT_MORE;
+                {
+                    static int gt_count = 0;
+                    if (gt_count++ < 10)
+                        fprintf(stderr, "MAP_REMOTE: '>' detected at scr(%d,%d) cave(%d,%d) "
+                            "w_x=%d w_y=%d\n",
+                            scr_x, scr_y, x, y, w_x, w_y);
+                }
+                break;
+            case ':':
+                feat = FEAT_RUBBLE;
+                break;
+            case ';':
+                feat = FEAT_PASS_RUBBLE;
+                break;
+            case '%':
+                /* Mineral veins */
+                if (attr == 7) /* COLOUR_L_WHITE */
+                    feat = FEAT_QUARTZ;
+                else
+                    feat = FEAT_MAGMA;
+                break;
+            case '*':
+                /* Treasure veins */
+                if (attr == 3) /* COLOUR_ORANGE */
+                    feat = FEAT_MAGMA_K;
+                else
+                    feat = FEAT_QUARTZ_K;
+                break;
+            case '~':
+                if (attr == 4) /* COLOUR_RED = lava */
+                    feat = FEAT_LAVA;
+                else {
+                    /* Tilde can also be an item (amulet, etc.) */
+                    feat = FEAT_FLOOR;
+                    is_object = true;
+                    object_attr = attr;
+                    object_char = ch;
+                }
+                break;
+            case '@':
+                /* Player symbol — the underlying terrain is hidden.
+                 * Default to floor, but check tracked stairs to preserve
+                 * the correct feat so borg knows when it's ON stairs. */
+                feat = FEAT_FLOOR;
+                is_player = true;
+                /* Check if player is on a previously tracked stair */
+                for (i = 0; i < track_more.num; i++) {
+                    if (track_more.x[i] == x && track_more.y[i] == y) {
+                        feat = FEAT_MORE;
+                        break;
+                    }
+                }
+                for (i = 0; i < track_less.num; i++) {
+                    if (track_less.x[i] == x && track_less.y[i] == y) {
+                        feat = FEAT_LESS;
+                        break;
+                    }
+                }
+                /* Also check tracked shop locations (9 slots) */
+                for (i = 0; i < 9; i++) {
+                    if (track_shop_x[i] == x && track_shop_y[i] == y) {
+                        feat = FEAT_STORE_GENERAL + i;
+                        break;
+                    }
+                }
+                break;
+            case ' ':
+                /* Space = empty / out-of-bounds area — treat as permanent
+                 * wall so the borg doesn't try to path through it.
+                 * In C-local mode FEAT_NONE is used for unexplored cells
+                 * (optimistic pathfinding), but in remote mode the entire
+                 * visible screen is authoritative. */
+                feat = FEAT_PERM;
+                break;
+            /* Store doors (digits 1-8) */
+            case '1': feat = FEAT_STORE_GENERAL; break;
+            case '2': feat = FEAT_STORE_ARMOR; break;
+            case '3': feat = FEAT_STORE_WEAPON; break;
+            case '4': feat = FEAT_STORE_BOOK; break;
+            case '5': feat = FEAT_STORE_ALCHEMY; break;
+            case '6': feat = FEAT_STORE_MAGIC; break;
+            case '7': feat = FEAT_STORE_BLACK; break;
+            case '8': feat = FEAT_HOME; break;
+            default:
+                /* Letters = monsters */
+                if (((char)ch >= 'a' && (char)ch <= 'z') ||
+                    ((char)ch >= 'A' && (char)ch <= 'Z')) {
+                    feat = FEAT_FLOOR;
+                    is_monster = true;
+                    monster_attr = attr;
+                    monster_char = ch;
+                }
+                /* Common item symbols */
+                else if (ch == '!' || ch == '?' || ch == '/' || ch == '|' ||
+                         ch == '\\' || ch == '{' || ch == '}' || ch == '(' ||
+                         ch == ')' || ch == '[' || ch == ']' || ch == '-' ||
+                         ch == '=' || ch == '"' || ch == '_' || ch == ',' ||
+                         ch == '&') {
+                    feat = FEAT_FLOOR;
+                    is_object = true;
+                    object_attr = attr;
+                    object_char = ch;
+                }
+                else {
+                    feat = FEAT_NONE;
+                }
+                break;
+            }
+
+            /* Update feature */
+            if (feat != FEAT_NONE) {
+                ag->info |= BORG_MARK;
+                ag->feat = feat;
+
+                /* Assume lit for visible features */
+                ag->info |= BORG_GLOW;
+                ag->info &= ~BORG_DARK;
+            }
+
+            /* Track player */
+            if (is_player) {
+                borg.c.x = x;
+                borg.c.y = y;
+            }
+
+            /* Default store */
+            ag->store = BORG_HOME;
+
+            /* Track shops */
+            if (feat >= FEAT_STORE_GENERAL && feat <= FEAT_HOME) {
+                i = feat - FEAT_STORE_GENERAL;
+                ag->store = i;
+                track_shop_x[i] = x;
+                track_shop_y[i] = y;
+            }
+
+            /* Track stairs */
+            if (feat == FEAT_LESS) {
+                for (i = 0; i < track_less.num; i++) {
+                    if ((track_less.x[i] == x) && (track_less.y[i] == y))
+                        break;
+                }
+                if ((i == track_less.num) && (i < track_less.size)) {
+                    track_less.x[i] = x;
+                    track_less.y[i] = y;
+                    track_less.num++;
+                }
+            }
+            if (feat == FEAT_MORE) {
+                for (i = 0; i < track_more.num; i++) {
+                    if ((track_more.x[i] == x) && (track_more.y[i] == y))
+                        break;
+                }
+                if ((i == track_more.num) && (i < track_more.size)) {
+                    track_more.x[i] = x;
+                    track_more.y[i] = y;
+                    track_more.num++;
+                }
+            }
+
+            /* Track monsters and objects via borg_wanks */
+            if ((is_monster || is_object) && !borg.trait[BI_ISIMAGE]) {
+                if (borg_wank_num < AUTO_VIEW_MAX) {
+                    borg_wank *wank = &borg_wanks[borg_wank_num++];
+                    wank->x = x;
+                    wank->y = y;
+                    wank->t_a = is_monster ? monster_attr : object_attr;
+                    wank->t_c = is_monster ? monster_char : object_char;
+                    wank->is_take = is_object;
+                    wank->is_kill = is_monster;
+                }
+            }
+
+            /* Clear trap/web for remote mode (can't detect from screen) */
+            ag->trap = false;
+            ag->glyph = false;
+            ag->web = false;
+
+            /* Wall change tracking */
+            new_wall = !borg_cave_floor_grid(ag);
+            if (old_wall != new_wall) {
+                if (new_wall)
+                    borg_data_flow->data[y][x] = 255;
+                borg_data_know->data[y][x] = false;
+                borg_data_icky->data[y][x] = false;
+                if (ag->info & BORG_VIEW)
+                    borg_do_update_view = true;
+                if (ag->info & BORG_LIGHT)
+                    borg_do_update_lite = true;
+            }
+        }
+    }
+
+    /* Debug: dump screen chars and borg_grids feats around player */
+    {
+        static int dump_count = 0;
+        if (dump_count < 5) {
+            dump_count++;
+            int px = borg.c.x, py = borg.c.y;
+            int r = 5; /* radius */
+            fprintf(stderr, "== MAP_REMOTE DUMP #%d borg@(%d,%d) ==\n", dump_count, px, py);
+            fprintf(stderr, "SCR chars+attrs (row 0=msg, 1+=map):\n");
+            for (int ry = py - r; ry <= py + r; ry++) {
+                int scr_y = remote_row_map + (ry - w_y);
+                fprintf(stderr, "y%02d scr%02d ch: ", ry, scr_y);
+                for (int rx = px - r; rx <= px + r; rx++) {
+                    int scr_x = remote_col_map + (rx - w_x);
+                    if (scr_y >= 0 && scr_y < 24 && scr_x >= 0 && scr_x < 80 && Term && Term->scr)
+                        fprintf(stderr, "%c", (char)Term->scr->c[scr_y][scr_x]);
+                    else
+                        fprintf(stderr, "?");
+                }
+                fprintf(stderr, "\n");
+                fprintf(stderr, "         at: ");
+                for (int rx = px - r; rx <= px + r; rx++) {
+                    int scr_x = remote_col_map + (rx - w_x);
+                    if (scr_y >= 0 && scr_y < 24 && scr_x >= 0 && scr_x < 80 && Term && Term->scr)
+                        fprintf(stderr, "%x", Term->scr->a[scr_y][scr_x] & 0xf);
+                    else
+                        fprintf(stderr, "?");
+                }
+                fprintf(stderr, "\n");
+            }
+            fprintf(stderr, "BORG_GRIDS feat:\n");
+            for (int ry = py - r; ry <= py + r; ry++) {
+                fprintf(stderr, "y%02d: ", ry);
+                for (int rx = px - r; rx <= px + r; rx++) {
+                    if (ry >= 0 && ry < AUTO_MAX_Y && rx >= 0 && rx < AUTO_MAX_X) {
+                        int f = borg_grids[ry][rx].feat;
+                        char c = '?';
+                        if (f == FEAT_NONE) c = ' ';
+                        else if (f == FEAT_FLOOR) c = '.';
+                        else if (f == FEAT_OPEN) c = '\'';
+                        else if (f == FEAT_CLOSED) c = '+';
+                        else if (f == FEAT_LESS) c = '<';
+                        else if (f == FEAT_MORE) c = '>';
+                        else if (f == FEAT_RUBBLE) c = ':';
+                        else if (f == FEAT_GRANITE) c = '#';
+                        else if (f == FEAT_PERM) c = 'P';
+                        else if (f >= FEAT_STORE_GENERAL && f <= FEAT_HOME)
+                            c = (char)('1' + (f - FEAT_STORE_GENERAL));
+                        else c = '?';
+                        if (ry == py && rx == px) c = '@';
+                        fprintf(stderr, "%c", c);
+                    } else
+                        fprintf(stderr, "X");
+                }
+                fprintf(stderr, "\n");
+            }
+        }
+
+        /* FULL TOWN MAP: dump entire borg_grids for town area (once) */
+        if (dump_count == 1) {
+            fprintf(stderr, "== FULL TOWN MAP (borg_grids 0-65 x 0-21) ==\n");
+            fprintf(stderr, "   ");
+            for (int fx = 0; fx < 66; fx++)
+                fprintf(stderr, "%d", fx % 10);
+            fprintf(stderr, "\n");
+            for (int fy = 0; fy < 22; fy++) {
+                fprintf(stderr, "%2d:", fy);
+                for (int fx = 0; fx < 66; fx++) {
+                    int f = borg_grids[fy][fx].feat;
+                    char c = '?';
+                    if (f == FEAT_NONE) c = ' ';
+                    else if (f == FEAT_FLOOR) c = '.';
+                    else if (f == FEAT_OPEN) c = '\'';
+                    else if (f == FEAT_CLOSED) c = '+';
+                    else if (f == FEAT_LESS) c = '<';
+                    else if (f == FEAT_MORE) c = '>';
+                    else if (f == FEAT_RUBBLE) c = ':';
+                    else if (f == FEAT_GRANITE) c = '#';
+                    else if (f == FEAT_PERM) c = 'P';
+                    else if (f >= FEAT_STORE_GENERAL && f <= FEAT_HOME)
+                        c = (char)('1' + (f - FEAT_STORE_GENERAL));
+                    else c = '?';
+                    if (fy == borg.c.y && fx == borg.c.x) c = '@';
+                    fprintf(stderr, "%c", c);
+                }
+                fprintf(stderr, "\n");
+            }
+            fprintf(stderr, "== END FULL TOWN MAP ==\n");
+        }
+    }
+}
+
 static void borg_update_map(void)
 {
     int i, x, y, dx, dy;
 
     borg_grid       *ag;
     struct grid_data g;
+
+    /* In remote mode, read from Term->scr instead of map_info() */
+    if (borg_remote) {
+        borg_update_map_remote();
+        return;
+    }
 
     /* Analyze the current map panel */
     for (dy = 0; dy < SCREEN_HGT; dy++) {
@@ -613,6 +995,7 @@ static void borg_update_map(void)
  */
 static void borg_fear_grid(int y, int x, int k)
 {
+    extern bool borg_remote;
     int        x1 = 0, y1 = 0;
     borg_kill *kill;
     borg_grid *ag;
@@ -626,7 +1009,7 @@ static void borg_fear_grid(int y, int x, int k)
         return;
 
     /* Do not add fear in a vault -- Cheating the cave info */
-    if (square_isvault(cave, loc(x, y)))
+    if (!borg_remote && square_isvault(cave, loc(x, y)))
         return;
 
     /* Access the grid info */
@@ -702,10 +1085,11 @@ static void borg_fear_grid(int y, int x, int k)
 static void borg_fear_regional(
     const char *who, int y, int x, int k, bool seen_guy) /* 8-8 , had been uint */
 {
+    extern bool borg_remote;
     int x0, y0, x1, x2, y1, y2;
 
     /* Do not add fear in a vault -- Cheating the cave info */
-    if (square_isvault(cave, loc(x, y)))
+    if (!borg_remote && square_isvault(cave, loc(x, y)))
         return;
 
     /* Messages */
