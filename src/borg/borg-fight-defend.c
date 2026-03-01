@@ -2816,6 +2816,12 @@ static int borg_defend_aux_lbeam(int p1)
 /* Shift the panel to locate offscreen monsters */
 static int borg_defend_aux_panel_shift(void)
 {
+    /* Remote mode: TS server auto-centers viewport on player.
+     * Panel shift keys (L + direction + ESC) are meaningless and
+     * the direction keys leak through as WALK commands into walls. */
+    extern bool borg_remote;
+    if (borg_remote) return 0;
+
     int dir = 0;
     int wx  = Term->offset_x / borg_panel_wid();
     int wy  = Term->offset_y / borg_panel_hgt();

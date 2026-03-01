@@ -612,9 +612,31 @@ void borg_auto_birth(void)
     /* Initialize player structure (required before player_generate) */
     player_init(player);
 
-    /* Pick random race and class */
-    p_race  = player_id2race(randint0(MAX_RACES));
-    p_class = player_id2class(randint0(MAX_CLASSES));
+    /* Pick race and class */
+    {
+        extern bool borg_remote;
+        if (borg_remote) {
+            /* Remote mode: force Human + Warrior to match TS server.
+             * The TS server always creates Human Warrior, so the C borg
+             * must use the same race/class for stat adjustments, blow
+             * calculations, and equipment weight/hold thresholds. */
+            struct player_race *r;
+            struct player_class *c;
+            for (r = races; r; r = r->next)
+                if (streq(r->name, "Human")) break;
+            for (c = classes; c; c = c->next)
+                if (streq(c->name, "Warrior")) break;
+            p_race = r ? r : player_id2race(randint0(MAX_RACES));
+            p_class = c ? c : player_id2class(randint0(MAX_CLASSES));
+            fprintf(stderr, "Remote borg: forced race=%s class=%s (r=%p c=%p)\n",
+                    p_race ? p_race->name : "NULL",
+                    p_class ? p_class->name : "NULL",
+                    (void*)r, (void*)c);
+        } else {
+            p_race  = player_id2race(randint0(MAX_RACES));
+            p_class = player_id2class(randint0(MAX_CLASSES));
+        }
+    }
 
     /* Generate the character */
     player_generate(player, p_race, p_class, false);
@@ -651,6 +673,12 @@ void borg_auto_birth(void)
     player->obj_k->to_a = 1;
     player->obj_k->to_h = 1;
     player->obj_k->to_d = 1;
+
+    /* Player knows all modifier runes (stat bonuses, speed, etc.)
+     * Without this, borg.trait[BI_ASTR] etc. multiplied by 0 = invisible.
+     * The borg should know all item properties for proper evaluation. */
+    for (i = 0; i < OBJ_MOD_MAX; i++)
+        player->obj_k->modifiers[i] = 1;
 
     /* Player learns innate runes */
     player_learn_innate(player);

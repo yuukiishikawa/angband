@@ -78,6 +78,10 @@ int16_t borg_respawning = 0;
 int w_x; /* Current panel offset (X) */
 int w_y; /* Current panel offset (Y) */
 
+/* Last direction key sent in remote mode (1-9, 0=none).
+ * Used by borg-messages.c to mark walls on "There is a wall" messages. */
+int borg_remote_last_dir = 0;
+
 /*
  * Time variables
  */
@@ -546,6 +550,7 @@ void borg_remote_loop(void)
     extern int  borg_remote_sock;
     extern int  recv_screen_frame(int sock);
     extern void borg_remote_send_key(int sock, keycode_t key, int mods);
+    extern int  borg_remote_last_dir;
 
     keycode_t borg_ch;
     uint8_t t_a;
@@ -689,6 +694,9 @@ void borg_remote_loop(void)
                         borg.c.x, borg.c.y, borg.trait[BI_CDEPTH]);
             prev_x = borg.c.x;
             prev_y = borg.c.y;
+            /* Track direction for wall detection in borg-messages.c */
+            if (borg_ch >= '1' && borg_ch <= '9' && borg_ch != '5')
+                borg_remote_last_dir = borg_ch - '0';
             borg_remote_send_key(borg_remote_sock, borg_ch, 0);
             remote_turn++;
             continue;
@@ -709,6 +717,9 @@ void borg_remote_loop(void)
                             borg.c.x, borg.c.y);
                 prev_x = borg.c.x;
                 prev_y = borg.c.y;
+                /* Track direction for wall detection */
+                if (qdir >= '1' && qdir <= '9' && qdir != '5')
+                    borg_remote_last_dir = qdir - '0';
                 borg_remote_send_key(borg_remote_sock, qdir, 0);
                 remote_turn++;
                 continue;
@@ -752,18 +763,27 @@ void borg_remote_loop(void)
          * Remaining keys stay in queue for step 4 on subsequent
          * iterations (one-key-per-frame synchronization). */
         borg_ch = borg_inkey(true);
-        if (borg_ch) {
-            if (remote_turn < 500 || borg.trait[BI_CDEPTH] > 0)
-                fprintf(stderr, "Remote borg[%d]: KEY %d '%c' pos(%d,%d) depth=%d goal=%d q=%d [post-think]\n",
-                        remote_turn, borg_ch,
-                        (borg_ch >= 32 && borg_ch < 127) ? (char)borg_ch : '?',
-                        borg.c.x, borg.c.y, borg.trait[BI_CDEPTH],
-                        borg.goal.type, borg_key_queue_depth());
-            prev_x = borg.c.x;
-            prev_y = borg.c.y;
-            borg_remote_send_key(borg_remote_sock, borg_ch, 0);
-            remote_turn++;
+        if (!borg_ch) {
+            /* Fallback: borg_think() produced no keys (e.g. all goals
+             * exhausted). Send 's' (search) to avoid deadlock — TS
+             * server waits for a key before sending next frame. */
+            borg_ch = 's';
+            fprintf(stderr, "Remote borg[%d]: IDLE — sending 's' fallback\n",
+                    remote_turn);
         }
+        if (remote_turn < 500 || borg.trait[BI_CDEPTH] > 0)
+            fprintf(stderr, "Remote borg[%d]: KEY %d '%c' pos(%d,%d) depth=%d goal=%d q=%d [post-think]\n",
+                    remote_turn, borg_ch,
+                    (borg_ch >= 32 && borg_ch < 127) ? (char)borg_ch : '?',
+                    borg.c.x, borg.c.y, borg.trait[BI_CDEPTH],
+                    borg.goal.type, borg_key_queue_depth());
+        prev_x = borg.c.x;
+        prev_y = borg.c.y;
+        /* Track direction for wall detection */
+        if (borg_ch >= '1' && borg_ch <= '9' && borg_ch != '5')
+            borg_remote_last_dir = borg_ch - '0';
+        borg_remote_send_key(borg_remote_sock, borg_ch, 0);
+        remote_turn++;
     }
 
     borg_json_log_finish();

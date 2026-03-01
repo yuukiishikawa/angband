@@ -425,9 +425,12 @@ bool borg_spell_okay(const enum borg_spells spell)
 
     borg_magic *as = &borg_magics[spell_num];
 
-    /* Dark */
-    if (no_light(player))
-        return false;
+    /* Dark — in remote mode, cave data is not available so skip */
+    {
+        extern bool borg_remote;
+        if (!borg_remote && no_light(player))
+            return false;
+    }
 
     /* Define reserve_mana for each class */
     switch (borg.trait[BI_CLASS]) {

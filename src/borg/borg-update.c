@@ -447,8 +447,20 @@ static void borg_update_map_remote(void)
 
             /* Update feature */
             if (feat != FEAT_NONE) {
-                ag->info |= BORG_MARK;
-                ag->feat = feat;
+                /* In remote mode, don't downgrade PERM→GRANITE.
+                 * PERM marks are set by message handlers (wall/futile)
+                 * to prevent the borg from walking into or digging
+                 * walls that the screen shows as GRANITE (#/SLATE). */
+                extern bool borg_remote;
+                if (borg_remote
+                    && ag->feat == FEAT_PERM
+                    && feat == FEAT_GRANITE) {
+                    /* Keep PERM but still mark as known */
+                    ag->info |= BORG_MARK;
+                } else {
+                    ag->info |= BORG_MARK;
+                    ag->feat = feat;
+                }
 
                 /* Assume lit for visible features */
                 ag->info |= BORG_GLOW;
@@ -698,11 +710,11 @@ static void borg_update_map(void)
                 track_shop_x[i] = x;
                 track_shop_y[i] = y;
 
-            } else if (square_isdisarmabletrap(cave, l)) {
+            } else if (!borg_remote && square_isdisarmabletrap(cave, l)) {
                 /* Minor cheat for the borg.  If the borg is running
                  * in the graphics mode (not the AdamBolt Tiles) he will
-                 * mis-id the glyph of warding as a trap
-                 */
+                 * mis-id the glyph of warding as a trap.
+                 * Skip in remote mode — cave data is stale. */
                 ag->trap      = true;
                 uint8_t t_idx = square(cave, l)->trap->t_idx;
                 if (trf_has(trap_info[t_idx].flags, TRF_GLYPH)) {

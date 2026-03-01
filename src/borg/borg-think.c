@@ -401,11 +401,15 @@ bool borg_think(void)
         /* Only do it once */
         borg_do_panel = false;
 
-        /* Enter "panel" mode */
-        borg_keypress('L');
+        /* Remote mode: panel is auto-centered, skip 'L' command */
+        extern bool borg_remote;
+        if (!borg_remote) {
+            /* Enter "panel" mode */
+            borg_keypress('L');
 
-        /* Done */
-        return true;
+            /* Done */
+            return true;
+        }
     }
 
     /*** Analyze the Frame ***/

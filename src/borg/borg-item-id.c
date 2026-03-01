@@ -53,6 +53,10 @@ bool borg_object_fully_id(void)
             && (streq(note, "{ }") || streq(note, "")
                 || strstr(note, "uncursed"))) {
 
+            /* Remote: skip inscription (TS doesn't support '{') */
+            extern bool borg_remote;
+            if (borg_remote) continue;
+
             /* make the inscription */
             borg_keypress('{');
 
