@@ -461,10 +461,17 @@ bool borg_drop_junk(void)
 
         /* inscribe "borg ignore". The borg crushes all items */
         /* on the floor that are inscribed this way */
-        borg_keypress('{');
-        borg_keypress(all_letters_nohjkl[b_i]);
-        borg_keypresses("borg ignore");
-        borg_keypress(KC_ENTER);
+        /* Remote: skip inscription (TS doesn't support '{'),
+         * keys leak through as game commands */
+        {
+            extern bool borg_remote;
+            if (!borg_remote) {
+                borg_keypress('{');
+                borg_keypress(all_letters_nohjkl[b_i]);
+                borg_keypresses("borg ignore");
+                borg_keypress(KC_ENTER);
+            }
+        }
 
         /* drop it then ignore it */
         borg_keypress('d');
@@ -923,10 +930,15 @@ bool borg_drop_hole(bool desperate)
         /* Drop that item */
         /* inscribe "borg ignore". The borg crushes all items */
         /* on the floor that are inscribed this way */
-        borg_keypress('{');
-        borg_keypress(all_letters_nohjkl[b_i]);
-        borg_keypresses("borg ignore");
-        borg_keypress(KC_ENTER);
+        {
+            extern bool borg_remote;
+            if (!borg_remote) {
+                borg_keypress('{');
+                borg_keypress(all_letters_nohjkl[b_i]);
+                borg_keypresses("borg ignore");
+                borg_keypress(KC_ENTER);
+            }
+        }
 
         /* drop it */
         borg_keypress('d');
@@ -1044,6 +1056,23 @@ bool borg_drop_slow(void)
         if (item->tval == TV_ROD && item->aware && item->sval == sv_rod_healing)
             continue;
 
+        /* Remote mode: never junk healing potions or Phase Door.
+         * These are irreplaceable — no town shops in remote mode. */
+        {
+            extern bool borg_remote;
+            if (borg_remote) {
+                if (item->tval == TV_POTION
+                    && (item->sval == sv_potion_cure_light
+                        || item->sval == sv_potion_cure_serious
+                        || item->sval == sv_potion_cure_critical
+                        || item->sval == sv_potion_healing))
+                    continue;
+                if (item->tval == TV_SCROLL
+                    && item->sval == sv_scroll_phase_door)
+                    continue;
+            }
+        }
+
         /* Destroy one of the items */
         borg_items[i].iqty--;
 
@@ -1105,20 +1134,25 @@ bool borg_drop_slow(void)
 
         /* inscribe "borg ignore". The borg crushes all items */
         /* on the floor that are inscribed this way */
-        borg_keypress('{');
-        if (b_i < INVEN_WIELD) {
-            borg_keypress(all_letters_nohjkl[b_i]);
-        } else if (b_i < QUIVER_START) {
-            borg_keypress('/');
+        {
+            extern bool borg_remote;
+            if (!borg_remote) {
+                borg_keypress('{');
+                if (b_i < INVEN_WIELD) {
+                    borg_keypress(all_letters_nohjkl[b_i]);
+                } else if (b_i < QUIVER_START) {
+                    borg_keypress('/');
 
-            borg_keypress(all_letters_nohjkl[b_i - INVEN_WIELD]);
-        } else {
-            /* Quiver Slot */
-            borg_keypress('|');
-            borg_keypress('0' + (b_i - QUIVER_START));
+                    borg_keypress(all_letters_nohjkl[b_i - INVEN_WIELD]);
+                } else {
+                    /* Quiver Slot */
+                    borg_keypress('|');
+                    borg_keypress('0' + (b_i - QUIVER_START));
+                }
+                borg_keypresses("borg ignore");
+                borg_keypress(KC_ENTER);
+            }
         }
-        borg_keypresses("borg ignore");
-        borg_keypress(KC_ENTER);
 
         /* Drop one item */
         borg_keypress('d');
@@ -1222,11 +1256,16 @@ bool borg_dump_quiver(void)
         borg_note(format("# Dumping %s.  Bad ammo in quiver.", item->desc));
 
         /* inscribe it */
-        borg_keypress('{');
-        borg_keypress('|');
-        borg_keypress(b_i - QUIVER_START + '0');
-        borg_keypresses("borg ignore");
-        borg_keypress(KC_ENTER);
+        {
+            extern bool borg_remote;
+            if (!borg_remote) {
+                borg_keypress('{');
+                borg_keypress('|');
+                borg_keypress(b_i - QUIVER_START + '0');
+                borg_keypresses("borg ignore");
+                borg_keypress(KC_ENTER);
+            }
+        }
 
         /* Drop it */
         borg_keypress('d');

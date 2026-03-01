@@ -548,6 +548,13 @@ static bool borg_escape_stair(void)
  */
 bool borg_allow_teleport(void)
 {
+    /* In remote mode, cave data is not available — assume teleport is allowed */
+    {
+        extern bool borg_remote;
+        if (borg_remote)
+            return !borg.trait[BI_CRSNOTEL];
+    }
+
     /* No teleporting in arena levels */
     if (player->upkeep->arena_level)
         return false;
@@ -989,8 +996,8 @@ bool borg_escape(int b_q)
 
             /* Start fleeing */
             fprintf(stderr, "[FLEE-SET] failed_teleport_1 at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
-            /* In remote mode, the borg has no teleport/phase scrolls, so
-             * this always triggers.  Don't set fleeing — let it fight. */
+            /* In remote mode, don't set flee goals — no shops to resupply,
+             * so town cycling is wasteful.  Scrolls still work for escape. */
             if (!borg_remote)
                 borg.goal.fleeing = true;
         }

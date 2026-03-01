@@ -34,6 +34,7 @@
 #include "ui-term.h"
 #include "init.h"           /* z_info */
 #include "cave.h"           /* FEAT_MORE, FEAT_LESS */
+#include "player-timed.h"   /* TMD_FOOD, PY_FOOD_FULL */
 
 /* Forward declarations for borg stair/grid access (avoid pulling all borg headers) */
 /* NOTE: must match borg-flow.h exactly — int16_t fields! */
@@ -332,6 +333,8 @@ static int hex_digit(char c)
  * Format: "STAT hp=15 mhp=15 sp=0 msp=0 lev=1 depth=0 speed=110 dead=0"
  * or:     "STAT str=16 int=8 wis=10 dex=14 con=15"
  */
+static bool stat_got_food = false;  /* frame-level: set by first STAT line */
+
 static void parse_stat_line(const char *line)
 {
     /* Skip "STAT " prefix */
@@ -363,7 +366,11 @@ static void parse_stat_line(const char *line)
             if (val > player->max_lev)
                 player->max_lev = val;
         }
-        else if (streq(key, "depth")) player->depth = val;
+        else if (streq(key, "depth")) {
+            player->depth = val;
+            if (val > player->max_depth)
+                player->max_depth = val;
+        }
         else if (streq(key, "speed")) player->state.speed = val;
         else if (streq(key, "dead"))  player->is_dead = (val != 0);
         else if (streq(key, "str"))   player->stat_cur[0] = val;
@@ -375,7 +382,27 @@ static void parse_stat_line(const char *line)
         else if (streq(key, "wy") && Term)  Term->offset_y = val;
         else if (streq(key, "px"))   player->grid.x = val;
         else if (streq(key, "py"))   player->grid.y = val;
+        else if (streq(key, "food")) {
+            player->timed[TMD_FOOD] = val;
+            stat_got_food = true;
+        }
+        /* Timed status effects (critical for borg decisions) */
+        else if (streq(key, "blind"))     player->timed[TMD_BLIND] = val;
+        else if (streq(key, "confused"))  player->timed[TMD_CONFUSED] = val;
+        else if (streq(key, "poisoned"))  player->timed[TMD_POISONED] = val;
+        else if (streq(key, "cut"))       player->timed[TMD_CUT] = val;
+        else if (streq(key, "stun"))      player->timed[TMD_STUN] = val;
+        else if (streq(key, "afraid"))    player->timed[TMD_AFRAID] = val;
+        else if (streq(key, "paralyzed")) player->timed[TMD_PARALYZED] = val;
+        else if (streq(key, "fast"))      player->timed[TMD_FAST] = val;
+        else if (streq(key, "slow"))      player->timed[TMD_SLOW] = val;
+        else if (streq(key, "image"))     player->timed[TMD_IMAGE] = val;
     }
+
+    /* Remote mode: if TS didn't send food across ALL STAT lines in this
+     * frame, assume well-fed.  The check is deferred to recv_screen_frame()
+     * because there are multiple STAT lines per frame (hp/lev, str/int,
+     * wx/wy) and only the first one contains "food=". */
 }
 
 /**
@@ -422,8 +449,8 @@ static void parse_inven_line(const char *line)
 
     /* Debug: log parsed INVEN data */
     if (borg_remote_inven_count <= 40) {
-        fprintf(stderr, "[INVEN-RECV] slot=%d tval=%d sval=%d qty=%d pval=%d timeout=%d name='%s'\n",
-                e->slot, e->tval, e->sval, e->qty, e->pval, e->timeout, e->name);
+        fprintf(stderr, "[INVEN-RECV] slot=%d tval=%d sval=%d qty=%d dd=%d ds=%d toH=%d toD=%d toA=%d ac=%d wt=%d pval=%d name='%s'\n",
+                e->slot, e->tval, e->sval, e->qty, e->dd, e->ds, e->to_h, e->to_d, e->to_a, e->ac, e->weight, e->pval, e->name);
     }
 }
 
@@ -463,6 +490,12 @@ int recv_screen_frame(int sock)
     /* Clear INVEN buffer for this frame */
     borg_remote_inven_count = 0;
 
+    /* Reset frame-level food tracking.  Multiple STAT lines are sent per
+     * frame; only the first (hp/lev line) includes "food=".  If no STAT
+     * line in this frame sets food, we apply the well-fed fallback after
+     * all lines have been parsed (see below END handling). */
+    stat_got_food = false;
+
     /* Reset stair tracking each frame — STAIR protocol sends all stairs
      * for the current level, so we start fresh to avoid stale data from
      * previous levels. */
@@ -483,6 +516,13 @@ int recv_screen_frame(int sock)
                 fprintf(stderr, "[FRAME-END] depth=%d lines=%d stairs_in_frame=%d\n",
                     player->depth, line_count, stair_lines_in_frame);
             end_dbg++;
+
+            /* Deferred food fallback: if no STAT line in this frame
+             * contained a "food=" key, assume well-fed so the borg
+             * doesn't think it's starving. */
+            if (!stat_got_food
+                && player->timed[TMD_FOOD] < PY_FOOD_HUNGRY)
+                player->timed[TMD_FOOD] = PY_FOOD_FULL - 1;
             break;
         }
 

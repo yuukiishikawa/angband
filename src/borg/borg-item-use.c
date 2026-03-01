@@ -152,9 +152,12 @@ bool borg_read_scroll(int sval)
 {
     int i;
 
-    /* Dark */
-    if (no_light(player))
-        return false;
+    /* Dark — in remote mode, cave data is not available so skip */
+    {
+        extern bool borg_remote;
+        if (!borg_remote && no_light(player))
+            return false;
+    }
 
     /* Blind or Confused or Amnesia*/
     if (borg.trait[BI_ISBLIND] || borg.trait[BI_ISCONFUSED]
@@ -215,9 +218,12 @@ bool borg_read_unknown(void)
     if (n < 0)
         return false;
 
-    /* Dark */
-    if (no_light(player))
-        return false;
+    /* Dark — in remote mode, cave data is not available so skip */
+    {
+        extern bool borg_remote;
+        if (!borg_remote && no_light(player))
+            return false;
+    }
 
     /* Blind or Confused */
     if (borg.trait[BI_ISBLIND] || borg.trait[BI_ISCONFUSED])
@@ -391,9 +397,9 @@ bool borg_eat_food_any(void)
             && (borg_quaff_potion(sv_potion_confusion)))) {
         return true;
     }
-    /* Consume in order, when hurting */
+    /* Consume in order, when hurting (use healing potions for nutrition) */
     if ((borg.trait[BI_CURHP] < 4
-            || (borg.trait[BI_CURHP] <= borg.trait[BI_MAXHP]))
+            || (borg.trait[BI_CURHP] < borg.trait[BI_MAXHP]))
         && (borg_quaff_potion(sv_potion_cure_light)
             || borg_quaff_potion(sv_potion_cure_serious)
             || borg_quaff_potion(sv_potion_cure_critical)

@@ -359,7 +359,9 @@ bool borg_think_stair_scum(void)
 
     borg_grid *ag = &borg_grids[borg.c.y][borg.c.x];
 
-    uint8_t feat  = square(cave, borg.c)->feat;
+    /* In remote mode, cave data is stale — use borg's screen-derived grid */
+    extern bool borg_remote;
+    uint8_t feat = borg_remote ? ag->feat : square(cave, borg.c)->feat;
 
     enum borg_need need;
 

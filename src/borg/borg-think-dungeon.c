@@ -94,7 +94,9 @@ static bool borg_think_dungeon_lunal(void)
 
     borg_grid *ag = &borg_grids[borg.c.y][borg.c.x];
 
-    uint8_t feat  = square(cave, borg.c)->feat;
+    /* In remote mode, cave data is stale — use borg's screen-derived grid */
+    extern bool borg_remote;
+    uint8_t feat = borg_remote ? ag->feat : square(cave, borg.c)->feat;
 
     enum borg_need need;
 
@@ -451,7 +453,9 @@ static bool borg_think_dungeon_munchkin(void)
 
     borg_grid *ag  = &borg_grids[borg.c.y][borg.c.x];
 
-    uint8_t feat   = square(cave, borg.c)->feat;
+    /* In remote mode, cave data is stale — use borg's screen-derived grid */
+    extern bool borg_remote;
+    uint8_t feat = borg_remote ? ag->feat : square(cave, borg.c)->feat;
 
     enum borg_need need;
 
@@ -1593,17 +1597,13 @@ bool borg_think_dungeon(void)
     }
 
     /*** if returning from dungeon in bad shape...***/
-    if (borg.trait[BI_LIGHT] == 0 || borg.trait[BI_ISCUT]
-        || borg.trait[BI_ISPOISONED] || borg.trait[BI_FOOD] == 0) {
+    /* In remote mode, skip FOOD==0 check — no shops exist, so returning to
+     * town for food is useless and causes bounce loops. */
+    {
         extern bool borg_remote;
-        if (borg_remote) {
-            static int bad_shape = 0;
-            if (bad_shape++ < 20)
-                fprintf(stderr, "think_dungeon: BAD SHAPE block entered! "
-                    "LIGHT=%d CUT=%d POISON=%d FOOD=%d\n",
-                    borg.trait[BI_LIGHT], borg.trait[BI_ISCUT],
-                    borg.trait[BI_ISPOISONED], borg.trait[BI_FOOD]);
-        }
+        bool bad_food = !borg_remote && borg.trait[BI_FOOD] == 0;
+        if (borg.trait[BI_LIGHT] == 0 || borg.trait[BI_ISCUT]
+            || borg.trait[BI_ISPOISONED] || bad_food) {
         /* First try to wear something */
         if (borg.trait[BI_LIGHT] == 0) {
             /* attempt to refuel/swap */
@@ -1628,6 +1628,7 @@ bool borg_think_dungeon(void)
             if (borg_flow_shop_entry(borg.goal.shop))
                 return true;
         }
+    }
     }
 
     /* if I must go to town without delay */

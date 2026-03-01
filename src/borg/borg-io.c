@@ -318,6 +318,28 @@ errr borg_keypress(keycode_t k)
         return (-1);
     }
 
+    /* Remote mode: rate-limit '<' (go up) on dungeon levels.
+     * Town has no shops, but ascending resets the level (useful for
+     * escaping breeders). Allow once per 10 turns to prevent loops.
+     * Bypass the rate-limit entirely at low HP — emergency escape. */
+    {
+        extern bool borg_remote;
+        static int last_ascend_turn = -10;
+        if (borg_remote && k == '<' && borg.trait[BI_CDEPTH] > 0) {
+            bool emergency = (borg.trait[BI_CURHP] * 2
+                < borg.trait[BI_MAXHP]);
+            if (!emergency && (int)borg_t - last_ascend_turn < 10) {
+                borg_note("# Remote: rate-limiting '<' (too recent).");
+                return 0;
+            }
+            last_ascend_turn = (int)borg_t;
+            if (emergency)
+                borg_note("# Remote: emergency '<' (low HP bypass).");
+            else
+                borg_note("# Remote: allowing '<' (level reset).");
+        }
+    }
+
     /* Store the char, advance the queue */
     borg_key_queue[borg_key_head++] = k;
 

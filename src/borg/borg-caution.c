@@ -882,9 +882,11 @@ bool borg_caution(void)
     borg_surround = borg_surrounded();
 
     /* Only allow three 'escapes' per level unless heading for morogoth
-       or fighting a unique, then allow 85. */
-    if ((borg.escapes > 3 && !unique_on_level && !borg.ready_morgoth)
-        || borg.escapes > 55) {
+       or fighting a unique, then allow 85.
+       In remote mode, skip — no shops to resupply, town cycling is wasteful. */
+    if (!borg_remote
+        && ((borg.escapes > 3 && !unique_on_level && !borg.ready_morgoth)
+            || borg.escapes > 55)) {
         /* No leaving if going after questors */
         if (borg.trait[BI_CDEPTH] <= 98) {
             /* Start leaving */
@@ -1146,12 +1148,18 @@ bool borg_caution(void)
 
     /*** Stairs ***/
 
-    /* Leaving or Fleeing, take stairs */
-    if (borg.goal.leaving || borg.goal.fleeing || scaryguy_on_level
-        || borg.goal.fleeing_lunal || borg.goal.fleeing_munchkin
-        || ((pos_danger > avoidance
-                || (borg.trait[BI_CLEVEL] < 5 && pos_danger > avoidance / 2))
-            && on_upstair)) /* danger and standing on stair */
+    /* Leaving or Fleeing, take stairs.
+     * In remote mode, skip the "low CL danger on stair" trigger —
+     * no shops to resupply, town cycling is wasteful. */
+    {
+        extern bool borg_remote;
+        bool danger_stair = !borg_remote
+            && ((pos_danger > avoidance
+                    || (borg.trait[BI_CLEVEL] < 5 && pos_danger > avoidance / 2))
+                && on_upstair);
+        if (borg.goal.leaving || borg.goal.fleeing || scaryguy_on_level
+            || borg.goal.fleeing_lunal || borg.goal.fleeing_munchkin
+            || danger_stair)
     {
         if (borg.ready_morgoth == 0 && !borg.trait[BI_KING]
             && !OPT(player, birth_force_descend)) {
@@ -1203,6 +1211,7 @@ bool borg_caution(void)
         if (!borg.trait[BI_CDEPTH])
             borg.stair_more = true;
     }
+    } /* end borg_remote danger_stair block */
 
     /* Take stairs up */
     if (borg.stair_less && !OPT(player, birth_force_descend)) {
@@ -1280,23 +1289,31 @@ bool borg_caution(void)
 
         /* Flee for food */
         if (borg.trait[BI_CDEPTH]) {
-            /* Start leaving */
-            if (!borg.goal.leaving) {
-                /* Flee */
-                borg_note("# Leaving (need food)");
-
+            extern bool borg_remote;
+            /* In remote mode, no shops exist — fleeing to town is useless
+             * and causes a DL0↔DL1 bounce loop.  Just keep exploring;
+             * the borg may find food drops and TS has no starvation death. */
+            if (!borg_remote) {
                 /* Start leaving */
-                borg.goal.leaving = true;
-            }
+                if (!borg.goal.leaving) {
+                    /* Flee */
+                    borg_note("# Leaving (need food)");
 
-            /* Start fleeing */
-            if (!borg.goal.fleeing) {
-                /* Flee */
-                borg_note("# Fleeing (need food)");
+                    /* Start leaving */
+                    borg.goal.leaving = true;
+                }
 
                 /* Start fleeing */
-                fprintf(stderr, "[FLEE-SET] need_food at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
-                borg.goal.fleeing = true;
+                if (!borg.goal.fleeing) {
+                    /* Flee */
+                    borg_note("# Fleeing (need food)");
+
+                    /* Start fleeing */
+                    fprintf(stderr, "[FLEE-SET] need_food at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
+                    borg.goal.fleeing = true;
+                }
+            } else {
+                borg_note("# Remote: ignoring food flee (no shops).");
             }
         }
     }

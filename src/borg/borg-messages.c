@@ -24,7 +24,9 @@
 #include "../mon-msg.h"
 #include "../ui-term.h"
 
+#include "../cave.h"
 #include "borg-cave.h"
+#include "borg-cave-view.h"
 #include "borg-danger.h"
 #include "borg-fight-attack.h"
 #include "borg-fight-defend.h"
@@ -701,6 +703,32 @@ static void borg_parse_aux(char *msg, int len)
         /* get rid of the goal monster we were chasing */
         if (borg.goal.type == GOAL_KILL && ag->kill)
             borg_delete_kill(ag->kill);
+
+        /* Clear digging goal — we can't dig this wall */
+        if (borg.goal.type == GOAL_DIGGING) {
+            borg.goal.type = 0;
+        }
+
+        /* In remote mode, mark the wall as permanent so borg_can_dig()
+         * returns false for this tile and the borg doesn't keep trying. */
+        {
+            extern bool borg_remote;
+            extern int  borg_remote_last_dir;
+            if (borg_remote && borg_remote_last_dir >= 1
+                && borg_remote_last_dir <= 9
+                && borg_remote_last_dir != 5) {
+                int wx = borg.c.x + ddx[borg_remote_last_dir];
+                int wy = borg.c.y + ddy[borg_remote_last_dir];
+                if (wx >= 0 && wx < DUNGEON_WID
+                    && wy >= 0 && wy < DUNGEON_HGT) {
+                    borg_grids[wy][wx].feat = FEAT_PERM;
+                    borg_grids[wy][wx].info |= BORG_MARK;
+                    fprintf(stderr, "Remote borg: futile dig at (%d,%d), "
+                            "marked as PERM\n", wx, wy);
+                }
+                borg_remote_last_dir = 0;
+            }
+        }
         return;
     }
 
@@ -842,6 +870,27 @@ static void borg_parse_aux(char *msg, int len)
         my_need_redraw = true;
         my_need_alter  = true;
         borg.goal.type = 0;
+        /* In remote mode, mark the target grid as granite wall so borg
+         * won't repeatedly try to walk through the same unknown wall. */
+        {
+            extern bool borg_remote;
+            extern int  borg_remote_last_dir;
+            if (borg_remote && borg_remote_last_dir >= 1
+                && borg_remote_last_dir <= 9
+                && borg_remote_last_dir != 5) {
+                int wx = borg.c.x + ddx[borg_remote_last_dir];
+                int wy = borg.c.y + ddy[borg_remote_last_dir];
+                if (wx >= 0 && wx < DUNGEON_WID
+                    && wy >= 0 && wy < DUNGEON_HGT) {
+                    borg_grids[wy][wx].feat = FEAT_PERM;
+                    borg_grids[wy][wx].info |= BORG_MARK;
+                    fprintf(stderr, "Remote borg: WALL detected at (%d,%d) "
+                            "dir=%d, marked as PERM\n",
+                            wx, wy, borg_remote_last_dir);
+                }
+                borg_remote_last_dir = 0;  /* consumed */
+            }
+        }
         return;
     }
 
