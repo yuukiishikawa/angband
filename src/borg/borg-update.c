@@ -271,11 +271,13 @@ static void borg_update_map_remote(void)
 
     {
         static int map_dbg = 0;
-        if (map_dbg++ < 3)
-            fprintf(stderr, "MAP_REMOTE: w_x=%d w_y=%d col=%d row=%d "
-                "cols=%d rows=%d\n",
-                w_x, w_y, remote_col_map, remote_row_map,
-                remote_map_cols, remote_map_rows);
+        static int last_wx = -999, last_wy = -999;
+        if (map_dbg++ < 3 || w_x != last_wx || w_y != last_wy) {
+            fprintf(stderr, "MAP_REMOTE: w_x=%d w_y=%d depth=%d borg@(%d,%d)\n",
+                w_x, w_y, borg.trait[BI_CDEPTH], borg.c.x, borg.c.y);
+            last_wx = w_x;
+            last_wy = w_y;
+        }
     }
 
     for (dy = 0; dy < remote_map_rows; dy++) {
@@ -341,13 +343,6 @@ static void borg_update_map_remote(void)
                 break;
             case '>':
                 feat = FEAT_MORE;
-                {
-                    static int gt_count = 0;
-                    if (gt_count++ < 10)
-                        fprintf(stderr, "MAP_REMOTE: '>' detected at scr(%d,%d) cave(%d,%d) "
-                            "w_x=%d w_y=%d\n",
-                            scr_x, scr_y, x, y, w_x, w_y);
-                }
                 break;
             case ':':
                 feat = FEAT_RUBBLE;
@@ -2546,9 +2541,17 @@ void borg_update(void)
         if (borg.trait[BI_CDEPTH] >= 2)
             borg.goal.fleeing_to_town = false;
 
-        /* No known stairs */
-        track_less.num = 0;
-        track_more.num = 0;
+        /* No known stairs.
+         * In remote mode, recv_screen_frame() handles track clearing
+         * per-frame via STAIR protocol, so skip here to avoid a race
+         * condition where STAIR data is wiped after being populated. */
+        {
+            extern bool borg_remote;
+            if (!borg_remote) {
+                track_less.num = 0;
+                track_more.num = 0;
+            }
+        }
 
         /* No known glyph */
         track_glyph.num = 0;

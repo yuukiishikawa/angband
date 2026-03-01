@@ -38,6 +38,8 @@
 #include "borg.h"
 #include "borg-prepared.h"
 
+extern bool borg_remote;  /* Remote mode flag (main-borg.c) */
+
 /*
  * Determine "twice" the distance between two points
  * This results in "diagonals" being "correctly" ranged,
@@ -375,8 +377,11 @@ bool borg_caution_phase(int emergency, int turns)
             break;
         }
 
-        /* If low level, unknown squares are scary */
-        if (ag->feat == FEAT_NONE && borg.trait[BI_MAXHP] < 30) {
+        /* If low level, unknown squares are scary.
+         * In remote mode, most squares are FEAT_NONE because only the
+         * viewport is mapped; skip this check to allow phase/teleport. */
+        if (ag->feat == FEAT_NONE && borg.trait[BI_MAXHP] < 30
+            && !borg_remote) {
             n++;
             continue;
         }
@@ -479,8 +484,11 @@ bool borg_caution_teleport(int emergency, int turns)
             break;
         }
 
-        /* If low level, unknown squares are scary */
-        if (ag->feat == FEAT_NONE && borg.trait[BI_MAXHP] < 30) {
+        /* If low level, unknown squares are scary.
+         * In remote mode, most squares are FEAT_NONE because only the
+         * viewport is mapped; skip this check to allow phase/teleport. */
+        if (ag->feat == FEAT_NONE && borg.trait[BI_MAXHP] < 30
+            && !borg_remote) {
             n++;
             continue;
         }
@@ -980,13 +988,17 @@ bool borg_escape(int b_q)
             borg_note("# Fleeing (failed to teleport)");
 
             /* Start fleeing */
-            borg.goal.fleeing = true;
+            fprintf(stderr, "[FLEE-SET] failed_teleport_1 at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
+            /* In remote mode, the borg has no teleport/phase scrolls, so
+             * this always triggers.  Don't set fleeing — let it fight. */
+            if (!borg_remote)
+                borg.goal.fleeing = true;
         }
 
         /* Flee now */
         if (!borg.goal.leaving
             && (!borg_fighting_unique || borg.trait[BI_CLEVEL] < 35)
-            && !vault_on_level) {
+            && !vault_on_level && !borg_remote) {
             /* Flee! */
             borg_note("# Leaving (failed to teleport)");
 
@@ -1054,11 +1066,13 @@ bool borg_escape(int b_q)
             borg_note("# Fleeing (failed to teleport)");
 
             /* Start fleeing */
-            borg.goal.fleeing = true;
+            fprintf(stderr, "[FLEE-SET] failed_teleport_2 at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
+            if (!borg_remote)
+                borg.goal.fleeing = true;
         }
 
         /* Flee now */
-        if (!borg.goal.leaving && !borg_fighting_unique && !vault_on_level) {
+        if (!borg.goal.leaving && !borg_fighting_unique && !vault_on_level && !borg_remote) {
             /* Flee! */
             borg_note("# Leaving (failed to teleport)");
 
@@ -1135,11 +1149,13 @@ bool borg_escape(int b_q)
             borg_note("# Fleeing (failed to teleport)");
 
             /* Start fleeing */
-            borg.goal.fleeing = true;
+            fprintf(stderr, "[FLEE-SET] failed_teleport_3 at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
+            if (!borg_remote)
+                borg.goal.fleeing = true;
         }
 
         /* Flee now */
-        if (!borg.goal.leaving && !borg_fighting_unique) {
+        if (!borg.goal.leaving && !borg_fighting_unique && !borg_remote) {
             /* Flee! */
             borg_note("# Leaving (failed to teleport)");
 

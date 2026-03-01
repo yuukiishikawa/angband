@@ -61,6 +61,9 @@
 #include "borg-trait.h"
 #include "borg.h"
 
+extern bool borg_remote;  /* Remote mode flag (main-borg.c) */
+bool borg_remote_descending = false;  /* Persistent descent flag */
+
 #ifdef BABLOS
 extern bool borg_clock_over;
 #endif /* bablos */
@@ -228,6 +231,7 @@ static bool borg_think_dungeon_lunal(void)
 
     /*leave level right away. */
     borg_note("# Fleeing level. Lunal Mode");
+    fprintf(stderr, "[FLEE-SET] lunal_mode at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
     borg.goal.fleeing_lunal = true;
     borg.goal.fleeing       = true;
 
@@ -332,7 +336,8 @@ static bool borg_think_dungeon_lunal(void)
                 return true;
 
             /* if standing on a stair */
-            if (ag->feat == FEAT_MORE) {
+            if (ag->feat == FEAT_MORE
+                && (!borg_remote || NULL == borg_prepared(borg.trait[BI_CDEPTH] + 1))) {
                 /* Take the downstairs */
                 borg_keypress('>');
 
@@ -581,6 +586,7 @@ static bool borg_think_dungeon_munchkin(void)
 
     /*leave level right away. */
     borg_note("# Fleeing level. Munchkin Mode");
+    fprintf(stderr, "[FLEE-SET] munchkin_mode at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
     borg.goal.fleeing_munchkin = true;
     borg.goal.fleeing          = true;
 
@@ -758,7 +764,8 @@ static bool borg_think_dungeon_munchkin(void)
                 return true;
 
             /* if standing on a stair */
-            if (ag->feat == FEAT_MORE) {
+            if (ag->feat == FEAT_MORE
+                && (!borg_remote || NULL == borg_prepared(borg.trait[BI_CDEPTH] + 1))) {
                 /* Take the DownStair */
                 borg_keypress('>');
 
@@ -908,7 +915,8 @@ static bool borg_think_dungeon_munchkin(void)
             borg_keypress('<');
             return true;
         }
-        if (ag->feat == FEAT_MORE) {
+        if (ag->feat == FEAT_MORE
+            && (!borg_remote || NULL == borg_prepared(borg.trait[BI_CDEPTH] + 1))) {
             /* Take the Stair */
             borg_keypress('>');
             return true;
@@ -949,8 +957,9 @@ static bool borg_think_dungeon_brave(void)
     /*** Flee (or leave) the level ***/
 
     /* Take stairs down */
-    /* Usable stairs */
-    if (borg_grids[borg.c.y][borg.c.x].feat == FEAT_MORE) {
+    /* Usable stairs (in remote mode, respect borg_prepared) */
+    if (borg_grids[borg.c.y][borg.c.x].feat == FEAT_MORE
+        && (!borg_remote || NULL == borg_prepared(borg.trait[BI_CDEPTH] + 1))) {
         /* Take the stairs */
         borg_note("# Fleeing via stairs.");
         borg_keypress('>');
@@ -1264,6 +1273,7 @@ bool borg_think_dungeon(void)
             borg_note("# Fleeing (boredom)");
 
             /* Start fleeing */
+            fprintf(stderr, "[FLEE-SET] boredom at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
             borg.goal.fleeing = true;
         }
     }
@@ -1298,6 +1308,7 @@ bool borg_think_dungeon(void)
             borg_note("# Fleeing (finish shopping)");
 
             /* Start fleeing */
+            fprintf(stderr, "[FLEE-SET] finish_shopping at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
             borg.goal.fleeing = true;
         }
     }
@@ -1349,6 +1360,7 @@ bool borg_think_dungeon(void)
             borg_note("# Fleeing (bouncing-borg)");
 
             /* Start fleeing */
+            fprintf(stderr, "[FLEE-SET] bouncing_borg at %s:%d depth=%d time_panel=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH], borg.time_this_panel);
             borg.goal.fleeing = true;
         }
     }
@@ -1370,15 +1382,26 @@ bool borg_think_dungeon(void)
             j++;
     }
 
-    /* hack -- close doors on breeder levels */
-    if (j >= 3) {
-        /* set the flag to close doors */
-        breeder_level = true;
-    }
+    {
+        extern bool borg_remote;
 
-    /* Caution from breeders */
-    if ((j >= MIN(borg.trait[BI_CLEVEL] + 2, 5))
-        && (borg.trait[BI_RECALL] <= 0 || borg.trait[BI_CLEVEL] < 35)) {
+        /* hack -- close doors on breeder levels */
+        if (j >= 3 && !borg_remote) {
+            /* set the flag to close doors */
+            breeder_level = true;
+        }
+
+        /* Caution from breeders.
+         * In remote mode, disable breeder panic entirely. Breeders multiply
+         * quickly on DL1 and the panic sends the borg to the closest stair
+         * (always up), causing infinite town/DL1 oscillation. Low-level
+         * breeders (grey mold 2HP, worm mass 4HP) are not truly dangerous. */
+        if (j > 0)
+            fprintf(stderr, "[BORG-BREEDER] awake_breeders=%d remote=%d\n",
+                    j, borg_remote);
+        if (!borg_remote
+            && (j >= MIN(borg.trait[BI_CLEVEL] + 2, 5))
+            && (borg.trait[BI_RECALL] <= 0 || borg.trait[BI_CLEVEL] < 35)) {
         /* Ignore monsters from caution */
         if (!borg.goal.ignoring && borg_t >= 2500) {
             /* Flee */
@@ -1403,9 +1426,11 @@ bool borg_think_dungeon(void)
             borg_note("# Fleeing (no recall)");
 
             /* Start fleeing */
+            fprintf(stderr, "[FLEE-SET] no_recall at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
             borg.goal.fleeing = true;
         }
     }
+    } /* end breeder_limit scope */
 
     /* Reset avoidance */
     if (avoidance != borg.trait[BI_CURHP]) {
@@ -1528,13 +1553,32 @@ bool borg_think_dungeon(void)
         return true;
     }
 
+    /* Remote mode: if standing on a down stair and prepared AND
+     * have spent enough time on this level, descend immediately.
+     * Without the time check the borg zooms through levels
+     * without leveling up. */
+    if (borg_remote && borg.trait[BI_CDEPTH] > 0
+        && borg_grids[borg.c.y][borg.c.x].feat == FEAT_MORE
+        && NULL == borg_prepared(borg.trait[BI_CDEPTH] + 1)) {
+        int time_here = borg_t - borg_began;
+        int limit_here = 20 + borg.trait[BI_CLEVEL] * 15;
+        if (time_here > limit_here || borg_remote_descending) {
+            borg_note("# Remote: standing on down stair, descending.");
+            borg_keypress('>');
+            borg_json_strategy = "Stairs";
+            return true;
+        }
+    }
+
     /* Decrease the amount of time not allowed to retreat */
     if (borg.no_retreat > 0)
         borg.no_retreat--;
 
     /* if we twitch a lot, time to leave */
-    if (borg.times_twitch > 20)
+    if (borg.times_twitch > 20) {
+        fprintf(stderr, "[FLEE-SET] twitch at %s:%d depth=%d twitch=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH], borg.times_twitch);
         borg.goal.fleeing = true;
+    }
 
     /*** Important goals ***/
 
@@ -1606,6 +1650,71 @@ bool borg_think_dungeon(void)
      */
     if (!borg_items[INVEN_WIELD].tval && borg_wear_stuff())
         return true;
+
+    /* Remote mode: proactive descent using persistent flag.
+     *
+     * borg_update() clears borg.goal.type every tick if the borg is
+     * cut/stunned/poisoned/afraid, so borg_flow_old(GOAL_BORE) can
+     * never continue a descent flow.  Instead we use a persistent
+     * borg_remote_descending flag: once activated, recalculate the
+     * stair flow fresh every tick until the borg reaches the stair. */
+    if (borg_remote && borg.trait[BI_CDEPTH] > 0) {
+        int time_on_level = borg_t - borg_began;
+        int stay_limit = 20 + borg.trait[BI_CLEVEL] * 15;
+        const char *prep = borg_prepared(borg.trait[BI_CDEPTH] + 1);
+
+        /* Debug: log every 25 borg_t ticks */
+        if (time_on_level % 25 == 0) {
+            fprintf(stderr, "[DESCENT-CHK] t=%d on_level=%d limit=%d prep=%s depth=%d clev=%d(p=%d) hp=%d/%d maxcl=%d desc=%d\n",
+                borg_t, time_on_level, stay_limit,
+                prep ? prep : "READY",
+                borg.trait[BI_CDEPTH], borg.trait[BI_CLEVEL],
+                player->lev,
+                borg.trait[BI_CURHP], borg.trait[BI_MAXHP],
+                borg.trait[BI_MAXCLEVEL],
+                borg_remote_descending);
+        }
+
+        /* Activate descending mode once stay_limit is exceeded */
+        if (time_on_level > stay_limit && prep == NULL) {
+            if (!borg_remote_descending) {
+                borg_note("# Remote mode: activating descent mode.");
+                borg_remote_descending = true;
+            }
+        }
+
+        /* Clear descending mode if no longer prepared */
+        if (prep != NULL)
+            borg_remote_descending = false;
+
+        /* While descending, recalculate stair flow every tick */
+        if (borg_remote_descending) {
+            borg.stair_more = true;
+
+            /* Boost avoidance so danger/icky check doesn't block */
+            int saved_avoidance = avoidance;
+            avoidance = 30000;
+            bool ok = borg_flow_stair_more(GOAL_BORE, false, true);
+            avoidance = saved_avoidance;
+            if (ok) {
+                /* Flow committed — now take the first step.
+                 * borg_flow_commit only saves the flow data; we need
+                 * borg_flow_old to actually press a movement key. */
+                if (borg_flow_old(GOAL_BORE)) {
+                    borg_json_strategy = "Stairs";
+                    return true;
+                }
+                /* If flow_old fails (e.g. already at destination),
+                 * fall through to explore or combat. */
+            }
+
+            /* Flow failed — explore to discover a path to the stair */
+            if (borg_flow_dark(false)) {
+                borg_json_strategy = "Explore (descent)";
+                return true;
+            }
+        }
+    }
 
     /* Dig an anti-summon corridor */
     if (borg_flow_kill_corridor())
@@ -1849,10 +1958,6 @@ bool borg_think_dungeon(void)
     if (borg_flow_vein(true, 5))
         return true;
 
-    /* Continue flowing towards (the hopefully close) monsters */
-    if (borg_flow_old(GOAL_KILL))
-        return true;
-
     /* Find a really close monster */
     if (borg_flow_kill(true, 20))
         return true;
@@ -1927,42 +2032,59 @@ bool borg_think_dungeon(void)
     /*** Leave the level XXX XXX XXX ***/
 
     /* Leave the level */
+    {
+    extern bool borg_remote;
     if ((borg.goal.leaving && !borg.goal.recalling && !unique_on_level)
-        || (borg.trait[BI_CDEPTH] && borg.trait[BI_CLEVEL] < 25
+        || (!borg_remote && borg.trait[BI_CDEPTH] && borg.trait[BI_CLEVEL] < 25
             && borg.trait[BI_GOLD] < 25000 && borg_count_sell() >= 13)) {
-        if (borg.ready_morgoth == 0 && !OPT(player, birth_force_descend)) {
-            borg_note(
-                "# Fleeing and leaving the level (Looking for Up Stair).");
-            borg.stair_less = true;
-        }
 
-        /* Only go down if fleeing or prepared. */
-        if ((char *)NULL == borg_prepared(borg.trait[BI_CDEPTH] + 1))
-            borg.stair_more = true;
-
-        /* Continue leaving the level */
-        if (borg_flow_old(GOAL_FLEE))
-            return true;
-
-        /* Try to find some stairs up */
-        if (borg.stair_less) {
-            if (borg_flow_stair_less(GOAL_FLEE, false)) {
-                borg_note("# Looking for stairs. Goal_Leaving.");
-
-                return true;
+        /* Remote mode: never flee upward — town has no shops.
+         * Clear stair_less and only allow downward movement. */
+        if (borg_remote) {
+            borg.stair_less = false;
+            borg.goal.leaving = false;
+            /* If prepared, descend instead of fleeing */
+            if ((char *)NULL == borg_prepared(borg.trait[BI_CDEPTH] + 1)) {
+                borg.stair_more = true;
+                if (borg_flow_stair_more(GOAL_FLEE, false, false))
+                    return true;
             }
-        }
+        } else {
+            if (borg.ready_morgoth == 0 && !OPT(player, birth_force_descend)) {
+                borg_note(
+                    "# Fleeing and leaving the level (Looking for Up Stair).");
+                borg.stair_less = true;
+            }
 
-        /* Only go up if needing to sell */
-        if (borg.trait[BI_CDEPTH] && borg.trait[BI_CLEVEL] < 25
-            && borg.trait[BI_GOLD] < 25000 && borg_count_sell() >= 13)
-            borg.stair_more = false;
+            /* Only go down if fleeing or prepared. */
+            if ((char *)NULL == borg_prepared(borg.trait[BI_CDEPTH] + 1))
+                borg.stair_more = true;
 
-        /* Try to find some stairs down */
-        if (borg.stair_more)
-            if (borg_flow_stair_more(GOAL_FLEE, false, false))
+            /* Continue leaving the level */
+            if (borg_flow_old(GOAL_FLEE))
                 return true;
+
+            /* Try to find some stairs up */
+            if (borg.stair_less) {
+                if (borg_flow_stair_less(GOAL_FLEE, false)) {
+                    borg_note("# Looking for stairs. Goal_Leaving.");
+
+                    return true;
+                }
+            }
+
+            /* Only go up if needing to sell */
+            if (borg.trait[BI_CDEPTH] && borg.trait[BI_CLEVEL] < 25
+                && borg.trait[BI_GOLD] < 25000 && borg_count_sell() >= 13)
+                borg.stair_more = false;
+
+            /* Try to find some stairs down */
+            if (borg.stair_more)
+                if (borg_flow_stair_more(GOAL_FLEE, false, false))
+                    return true;
+        }
     }
+    } /* end borg_remote scope for sell check */
 
     /* Power dive if I am playing too shallow
      * This is also seen in leave_level().  If
@@ -1979,8 +2101,8 @@ bool borg_think_dungeon(void)
         if (borg_flow_old(GOAL_BORE))
             return true;
 
-        /* No down if needing to sell */
-        if (borg.trait[BI_CDEPTH] && borg.trait[BI_CLEVEL] < 25
+        /* No down if needing to sell (skip in remote — no shops) */
+        if (!borg_remote && borg.trait[BI_CDEPTH] && borg.trait[BI_CLEVEL] < 25
             && borg.trait[BI_GOLD] < 25000 && borg_count_sell() >= 13) {
             borg.stair_more = false;
         }

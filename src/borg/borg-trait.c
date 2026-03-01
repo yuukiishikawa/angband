@@ -2824,6 +2824,8 @@ static void borg_notice_inventory(void)
     /* If weak, do not count food spells */
     if (borg.trait[BI_ISWEAK] && (borg.trait[BI_FOOD] >= 1000))
         borg.trait[BI_FOOD] -= 1000;
+
+    /* Debug removed — sval fix confirmed working */
 }
 
 /*

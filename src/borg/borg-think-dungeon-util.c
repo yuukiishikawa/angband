@@ -49,6 +49,8 @@
 #include "borg-update.h"
 #include "borg.h"
 
+extern bool borg_remote;  /* Remote mode flag (main-borg.c) */
+
 /*
  * Importance of the various "level feelings".
  * These values are arbitrary estimates.
@@ -440,6 +442,7 @@ bool borg_think_stair_scum(void)
 
     /*leave level right away. */
     borg_note("# Fleeing level. Scumming Mode");
+    fprintf(stderr, "[FLEE-SET] scumming_mode at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
     borg.goal.fleeing = true;
 
     /* Scumming Mode - Going down */
@@ -649,6 +652,7 @@ bool borg_leave_level(bool bored)
         if (borg.trait[BI_MAXDEPTH] == 100 && !borg_cfg[BORG_PLAYS_RISKY]) {
             if (borg_restock(100)) {
                 /* These pple must crawl down to 100, Sorry */
+                fprintf(stderr, "[FLEE-SET] crawl_to_100 at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
                 borg.goal.fleeing = true;
                 borg.goal.leaving = true;
                 borg.stair_more   = true;
@@ -698,7 +702,16 @@ bool borg_leave_level(bool bored)
                     }
                 }
             }
-            borg.goal.fleeing = true;
+            fprintf(stderr, "[FLEE-SET] cant_recall at %s:%d depth=%d maxdepth=%d recall=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH], borg.trait[BI_MAXDEPTH], borg.trait[BI_RECALL]);
+            {
+                extern bool borg_remote;
+                /* In remote mode, don't set fleeing when we can't recall.
+                 * Remote borg never has recall scrolls, so this always fires
+                 * in town and causes the borg to flee from everything. Just
+                 * set leaving=true so the borg walks to stairs normally. */
+                if (!borg_remote)
+                    borg.goal.fleeing = true;
+            }
             borg.goal.leaving = true;
         }
 
@@ -726,9 +739,13 @@ bool borg_leave_level(bool bored)
     /* Count sellable items */
     sellable_item_count = borg_count_sell();
 
-    /* Do not dive when "full" of items */
-    if (sellable_item_count >= 12)
-        try_not_to_descend = true;
+    /* Do not dive when "full" of items
+     * (skip in remote mode — no shops, sell count is meaningless) */
+    {
+        extern bool borg_remote;
+        if (!borg_remote && sellable_item_count >= 12)
+            try_not_to_descend = true;
+    }
 
     /* Do not dive when drained */
     if (g && borg.trait[BI_ISFIXEXP])
@@ -755,7 +772,7 @@ bool borg_leave_level(bool bored)
     /* Power dive if I am playing too shallow*/
     else if (!try_not_to_descend
              && NULL == borg_prepared(borg.trait[BI_CDEPTH] + 5)
-             && sellable_item_count < 13) {
+             && (borg_remote || sellable_item_count < 13)) {
         g = 1;
         borg_note("# power dive, playing too shallow.");
     }
@@ -799,8 +816,10 @@ bool borg_leave_level(bool bored)
         }
     }
 
-    /* If playing way too shallow return to town to recall deeper. */
-    if (NULL == borg_prepared(borg.trait[BI_CDEPTH] + 20)
+    /* If playing way too shallow return to town to recall deeper.
+     * (skip in remote mode — no recall available) */
+    if (!borg_remote
+        && NULL == borg_prepared(borg.trait[BI_CDEPTH] + 20)
         && NULL == borg_prepared(borg.trait[BI_MAXDEPTH] * 6 / 10)
         && borg.trait[BI_MAXDEPTH] > borg.trait[BI_CDEPTH] + 20
         && (borg.trait[BI_RECALL] >= 3 || borg.trait[BI_GOLD] > 2000)) {
@@ -808,16 +827,19 @@ bool borg_leave_level(bool bored)
         borg.goal.rising = true;
     }
 
-    /* Return to town to sell stuff -- No recall allowed.*/
-    if (((borg_cfg[BORG_WORSHIPS_GOLD] || borg.trait[BI_MAXCLEVEL] < 15)
+    /* Return to town to sell stuff -- No recall allowed.
+     * (skip in remote mode — no shops) */
+    if (!borg_remote
+        && ((borg_cfg[BORG_WORSHIPS_GOLD] || borg.trait[BI_MAXCLEVEL] < 15)
             && borg.trait[BI_MAXCLEVEL] <= 25)
         && (sellable_item_count >= 12)) {
         borg_note("# Going to town (Sell Stuff, Worshipping Gold).");
         borg.goal.rising = true;
     }
 
-    /* Return to town to sell stuff (use Recall) */
-    if ((bored && borg.trait[BI_MAXCLEVEL] >= 26)
+    /* Return to town to sell stuff (use Recall)
+     * (skip in remote mode — no shops) */
+    if (!borg_remote && (bored && borg.trait[BI_MAXCLEVEL] >= 26)
         && (sellable_item_count >= 12)) {
         borg_note("# Going to town (Sell Stuff).");
         borg.goal.rising = true;
@@ -835,10 +857,12 @@ bool borg_leave_level(bool bored)
         borg.goal.rising = true;
     }
 
-    /* return to town if it has been a while */
-    if ((!borg.goal.rising && bored && !vault_on_level && !borg_fighting_unique
-        && borg_time_town + borg_t - borg_began > 8000)
-        || (borg_time_town + borg_t - borg_began > 12000)) {
+    /* return to town if it has been a while
+     * (skip in remote mode — no effective town interaction) */
+    if (!borg_remote
+        && ((!borg.goal.rising && bored && !vault_on_level && !borg_fighting_unique
+            && borg_time_town + borg_t - borg_began > 8000)
+            || (borg_time_town + borg_t - borg_began > 12000))) {
         /* don't get bored when hunting uniques */
         if (borg.trait[BI_MAXDEPTH] < 99 || !unique_on_level) {
             borg_note("# Going to town (I miss my home).");
@@ -846,8 +870,10 @@ bool borg_leave_level(bool bored)
         }
     }
 
-    /* return to town if been scumming for a bit */
-    if (borg.trait[BI_MAXDEPTH] >= borg.trait[BI_CDEPTH] + 10
+    /* return to town if been scumming for a bit
+     * (skip in remote mode — no effective town interaction) */
+    if (!borg_remote
+        && borg.trait[BI_MAXDEPTH] >= borg.trait[BI_CDEPTH] + 10
         && borg.trait[BI_CDEPTH] <= 12
         && borg_time_town + borg_t - borg_began > 3500) {
         borg_note("# Going to town (scumming check).");
@@ -917,6 +943,20 @@ bool borg_leave_level(bool bored)
 
     /* Go Up */
     if (g < 0) {
+        /* Remote mode: never go up — no useful town services.
+         * Convert upward movement to downward if prepared. */
+        extern bool borg_remote;
+        if (borg_remote) {
+            if (NULL == borg_prepared(borg.trait[BI_CDEPTH] + 1)) {
+                g = 1;  /* Go down instead */
+                borg_note("# Remote: converting go-up to go-down.");
+            } else {
+                g = 0;  /* Stay on current level */
+                borg.goal.rising = false;
+                borg.goal.leaving = false;
+                return false;
+            }
+        }
         if (!OPT(player, birth_force_descend)) {
             /* Take next stairs */
             borg_note("# Looking for up stairs.  Going up.");
