@@ -301,6 +301,30 @@ static bool borg_heal(int danger)
     if (hp_down == 0)
         return false;
 
+    /* In remote mode, heal aggressively — no teleport/phase/recall available.
+     * The normal heal checks require danger < HP + heal which fails at low
+     * level because perceived danger often exceeds MaxHP.  Also allow healing
+     * when danger == 0 (safe moment between fights). */
+    {
+        extern bool borg_remote;
+        if (borg_remote && pct_down >= 40) {
+            if (borg_quaff_potion(sv_potion_cure_serious)
+                || borg_quaff_potion(sv_potion_cure_light)
+                || borg_quaff_crit(false)
+                || borg_spell_fail(MINOR_HEALING, allow_fail)) {
+                borg_note("# Healing (remote aggressive).");
+                return true;
+            }
+        }
+        if (borg_remote && pct_down >= 25) {
+            if (borg_quaff_potion(sv_potion_cure_light)
+                || borg_spell_fail(MINOR_HEALING, allow_fail)) {
+                borg_note("# Healing (remote light).");
+                return true;
+            }
+        }
+    }
+
     /* Don't bother healing if not in danger */
     if (danger == 0 && !borg.trait[BI_ISPOISONED] && !borg.trait[BI_ISCUT])
         return false;
@@ -878,37 +902,44 @@ bool borg_caution(void)
                 borg_note("# Fleeing (Too many escapes)");
 
                 /* Start fleeing */
+                fprintf(stderr, "[FLEE-SET] too_many_escapes at %s:%d depth=%d escapes=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH], borg.escapes);
                 borg.goal.fleeing = true;
             }
         }
     }
 
-    /* No hanging around if nasty here. */
-    if (scaryguy_on_level) {
-        /* Note */
-        borg_note("# Scary guy on level.");
-
-        /* Start leaving */
-        if (!borg.goal.leaving) {
+    /* No hanging around if nasty here.
+     * In remote mode, skip scaryguy flee — the borg has no escape spells
+     * and should fight DL1-3 monsters instead of running to stairs. */
+    {
+        extern bool borg_remote;
+        if (scaryguy_on_level && !borg_remote) {
             /* Note */
-            borg_note("# Leaving (Scary guy on level)");
+            borg_note("# Scary guy on level.");
 
             /* Start leaving */
-            borg.goal.leaving = true;
-        }
+            if (!borg.goal.leaving) {
+                /* Note */
+                borg_note("# Leaving (Scary guy on level)");
 
-        /* Start fleeing */
-        if (!borg.goal.fleeing) {
-            /* Note */
-            borg_note("# Fleeing (Scary guy on level)");
+                /* Start leaving */
+                borg.goal.leaving = true;
+            }
 
             /* Start fleeing */
-            borg.goal.fleeing = true;
-        }
+            if (!borg.goal.fleeing) {
+                /* Note */
+                borg_note("# Fleeing (Scary guy on level)");
 
-        /* Return to town quickly after leaving town */
-        if (borg.trait[BI_CDEPTH] == 0)
-            borg.goal.fleeing_to_town = true;
+                /* Start fleeing */
+                fprintf(stderr, "[FLEE-SET] scaryguy at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
+                borg.goal.fleeing = true;
+            }
+
+            /* Return to town quickly after leaving town */
+            if (borg.trait[BI_CDEPTH] == 0)
+                borg.goal.fleeing_to_town = true;
+        }
     }
 
     /* Make a note if Ignoring monsters (no fighting) */
@@ -1081,6 +1112,7 @@ bool borg_caution(void)
                 "# Fleeing (restock) %s", borg_restock(borg.trait[BI_CDEPTH])));
 
             /* Start fleeing */
+            fprintf(stderr, "[FLEE-SET] restock at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
             borg.goal.fleeing = true;
         }
     }
@@ -1095,6 +1127,7 @@ bool borg_caution(void)
             borg_note("# Fleeing (excessive danger)");
 
             /* Start fleeing */
+            fprintf(stderr, "[FLEE-SET] excessive_danger at %s:%d depth=%d danger=%d hp=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH], pos_danger, borg.trait[BI_CURHP]);
             borg.goal.fleeing = true;
         }
     }
@@ -1152,11 +1185,15 @@ bool borg_caution(void)
                 || borg.trait[BI_ISWEAK] || borg.trait[BI_FOOD] < 2))
             borg.stair_more = false;
 
-        /* If I need to sell crap, then don't go down if I can go up */
-        if (track_less.num && borg.trait[BI_CDEPTH]
-            && borg.trait[BI_CLEVEL] < 25 && borg.trait[BI_GOLD] < 25000
-            && borg_count_sell() >= 13)
-            borg.stair_more = false;
+        /* If I need to sell crap, then don't go down if I can go up
+         * (skip in remote mode — no shops available) */
+        {
+            extern bool borg_remote;
+            if (!borg_remote && track_less.num && borg.trait[BI_CDEPTH]
+                && borg.trait[BI_CLEVEL] < 25 && borg.trait[BI_GOLD] < 25000
+                && borg_count_sell() >= 13)
+                borg.stair_more = false;
+        }
 
         /* Its ok to go one level deep if evading scary guy */
         if (scaryguy_on_level)
@@ -1258,22 +1295,29 @@ bool borg_caution(void)
                 borg_note("# Fleeing (need food)");
 
                 /* Start fleeing */
+                fprintf(stderr, "[FLEE-SET] need_food at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
                 borg.goal.fleeing = true;
             }
         }
     }
 
-    /* Prevent breeder explosions when low level */
-    if (breeder_level && borg.trait[BI_CLEVEL] < 15) {
+    /* Prevent breeder explosions when low level.
+     * In remote mode, skip this check — breeder detection is unreliable
+     * with viewport-only monster data, and this causes town oscillation. */
+    {
+        extern bool borg_remote;
+        if (breeder_level && borg.trait[BI_CLEVEL] < 15 && !borg_remote) {
         /* Start leaving */
         if (!borg.goal.fleeing) {
             /* Flee */
             borg_note("# Fleeing (breeder level)");
 
             /* Start fleeing */
+            fprintf(stderr, "[FLEE-SET] breeder_level at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
             borg.goal.fleeing = true;
         }
     }
+    } /* end borg_remote scope */
 
     /*** Flee on foot ***/
 
@@ -1912,6 +1956,7 @@ bool borg_caution(void)
                 borg_note("# Fleeing (low hit-points)");
 
                 /* Start fleeing */
+                fprintf(stderr, "[FLEE-SET] low_hp at %s:%d depth=%d hp=%d/%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH], borg.trait[BI_CURHP], borg.trait[BI_MAXHP]);
                 borg.goal.fleeing = true;
             }
         }
@@ -1937,6 +1982,7 @@ bool borg_caution(void)
                 borg_note("# Fleeing (bleeding/poison)");
 
                 /* Start fleeing */
+                fprintf(stderr, "[FLEE-SET] bleeding_poison at %s:%d depth=%d\n", __FILE__, __LINE__, borg.trait[BI_CDEPTH]);
                 borg.goal.fleeing = true;
             }
         }

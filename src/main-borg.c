@@ -33,6 +33,36 @@
 #include "ui-game.h"
 #include "ui-term.h"
 #include "init.h"           /* z_info */
+#include "cave.h"           /* FEAT_MORE, FEAT_LESS */
+
+/* Forward declarations for borg stair/grid access (avoid pulling all borg headers) */
+/* NOTE: must match borg-flow.h exactly — int16_t fields! */
+struct borg_track {
+    int16_t num;
+    int16_t size;
+    int    *x;
+    int    *y;
+};
+extern struct borg_track track_more;
+extern struct borg_track track_less;
+
+#define AUTO_MAX_X 198
+#define AUTO_MAX_Y 66
+#define BORG_MARK  0x01
+
+/* Minimal borg_grid definition matching borg-cave.h */
+typedef struct borg_grid {
+    uint8_t  feat;
+    uint16_t info;
+    bool     trap;
+    bool     glyph;
+    bool     web;
+    uint8_t  store;
+    uint8_t  take;
+    uint8_t  kill;
+    uint8_t  xtra;
+} borg_grid;
+extern borg_grid *borg_grids[AUTO_MAX_Y];
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -328,7 +358,11 @@ static void parse_stat_line(const char *line)
         else if (streq(key, "mhp"))   player->mhp = val;
         else if (streq(key, "sp"))    player->csp = val;
         else if (streq(key, "msp"))   player->msp = val;
-        else if (streq(key, "lev"))   player->lev = val;
+        else if (streq(key, "lev")) {
+            player->lev = val;
+            if (val > player->max_lev)
+                player->max_lev = val;
+        }
         else if (streq(key, "depth")) player->depth = val;
         else if (streq(key, "speed")) player->state.speed = val;
         else if (streq(key, "dead"))  player->is_dead = (val != 0);
@@ -356,6 +390,7 @@ struct remote_inven_entry {
     int tval, sval, qty;
     int to_h, to_d, to_a;
     int dd, ds, ac, weight;
+    int pval, timeout;
     char name[80];
     bool valid;
 };
@@ -371,10 +406,11 @@ static void parse_inven_line(const char *line)
     struct remote_inven_entry *e = &borg_remote_inven[borg_remote_inven_count];
     memset(e, 0, sizeof(*e));
 
-    if (sscanf(line, "INVEN %d %d %d %d %d %d %d %d %d %d %d %79s",
+    if (sscanf(line, "INVEN %d %d %d %d %d %d %d %d %d %d %d %d %d %79s",
                &e->slot, &e->tval, &e->sval, &e->qty,
                &e->to_h, &e->to_d, &e->to_a,
-               &e->dd, &e->ds, &e->ac, &e->weight, e->name) < 12)
+               &e->dd, &e->ds, &e->ac, &e->weight,
+               &e->pval, &e->timeout, e->name) < 14)
         return;
 
     /* Replace underscores with spaces in name */
@@ -383,6 +419,12 @@ static void parse_inven_line(const char *line)
 
     e->valid = true;
     borg_remote_inven_count++;
+
+    /* Debug: log parsed INVEN data */
+    if (borg_remote_inven_count <= 40) {
+        fprintf(stderr, "[INVEN-RECV] slot=%d tval=%d sval=%d qty=%d pval=%d timeout=%d name='%s'\n",
+                e->slot, e->tval, e->sval, e->qty, e->pval, e->timeout, e->name);
+    }
 }
 
 /**
@@ -421,13 +463,31 @@ int recv_screen_frame(int sock)
     /* Clear INVEN buffer for this frame */
     borg_remote_inven_count = 0;
 
+    /* Reset stair tracking each frame — STAIR protocol sends all stairs
+     * for the current level, so we start fresh to avoid stale data from
+     * previous levels. */
+    track_more.num = 0;
+    track_less.num = 0;
+
     /* Read ROW, CURSOR, STAT, INVEN, END lines */
+    int line_count = 0;
+    int stair_lines_in_frame = 0;
     while (1) {
         line = recv_line(sock);
         if (!line) return -1;
+        line_count++;
 
-        if (streq(line, "END"))
+        if (streq(line, "END")) {
+            static int end_dbg = 0;
+            if (end_dbg < 10 && player->depth > 0)
+                fprintf(stderr, "[FRAME-END] depth=%d lines=%d stairs_in_frame=%d\n",
+                    player->depth, line_count, stair_lines_in_frame);
+            end_dbg++;
             break;
+        }
+
+        if (prefix(line, "STAIR"))
+            stair_lines_in_frame++;
 
         if (prefix(line, "ROW ")) {
             /* Parse: ROW <y> <hex_chars> <hex_attrs> */
@@ -463,10 +523,45 @@ int recv_screen_frame(int sock)
             }
         }
         else if (prefix(line, "STAT ")) {
+            int old_lev = player->lev;
             parse_stat_line(line);
+            if (player->lev != old_lev)
+                fprintf(stderr, "[STAT-LVLUP] lev changed %d → %d max_lev=%d (raw: %.80s)\n",
+                    old_lev, player->lev, player->max_lev, line);
         }
         else if (prefix(line, "INVEN ")) {
             parse_inven_line(line);
+        }
+        else if (prefix(line, "STAIR ")) {
+            /* STAIR <x> <y> <up|down> — populate track_more/track_less */
+            int sx, sy;
+            char dir[8];
+            if (sscanf(line, "STAIR %d %d %7s", &sx, &sy, dir) >= 3) {
+                struct borg_track *trk = streq(dir, "down") ? &track_more : &track_less;
+                fprintf(stderr, "[STAIR-RECV] %s at (%d,%d) trk_x=%p trk_y=%p size=%d num=%d\n",
+                        dir, sx, sy, (void*)trk->x, (void*)trk->y, trk->size, trk->num);
+                /* Safety: track arrays may not be allocated yet */
+                if (trk->x && trk->y && trk->size > 0) {
+                    /* Check if already tracked */
+                    int found = 0;
+                    for (int i = 0; i < trk->num; i++) {
+                        if (trk->x[i] == sx && trk->y[i] == sy) { found = 1; break; }
+                    }
+                    if (!found && trk->num < trk->size) {
+                        trk->x[trk->num] = sx;
+                        trk->y[trk->num] = sy;
+                        trk->num++;
+                        fprintf(stderr, "[STAIR] Tracked %s stair at (%d,%d) total=%d\n",
+                                dir, sx, sy, trk->num);
+                    }
+                }
+                /* Also mark the grid feat so borg's flow routines work */
+                if (sx >= 0 && sx < AUTO_MAX_X && sy >= 0 && sy < AUTO_MAX_Y
+                    && borg_grids[sy]) {
+                    borg_grids[sy][sx].feat = streq(dir, "down") ? FEAT_MORE : FEAT_LESS;
+                    borg_grids[sy][sx].info |= BORG_MARK;
+                }
+            }
         }
     }
 

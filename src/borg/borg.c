@@ -36,6 +36,8 @@
 #include "borg-think.h"
 #include "borg-trait.h"
 #include "borg-util.h"
+#include "borg-flow-stairs.h"  /* track_more, track_less */
+#include "borg-cave-view.h"   /* BORG_MARK */
 
 bool borg_cheat_death;
 
@@ -556,6 +558,7 @@ void borg_remote_loop(void)
     int remote_turn = 0;
     int prev_x = -1, prev_y = -1;
     int stuck_count = 0;
+    int prev_depth = -999;  /* Track depth changes for borg_grids reset */
 
     while (1) {
         /* 1. Receive screen frame from TS server */
@@ -623,23 +626,54 @@ void borg_remote_loop(void)
             cave = cave_new(DUNGEON_HGT, DUNGEON_WID);
         }
 
+        /* Track depth changes (for logging/diagnostics) */
+        if (player->depth != prev_depth) {
+            fprintf(stderr, "Remote borg[%d]: depth changed %d → %d\n",
+                    remote_turn, prev_depth, player->depth);
+            prev_depth = player->depth;
+            /* Clear persistent descent flag on level change */
+            extern bool borg_remote_descending;
+            borg_remote_descending = false;
+        }
+
         /* Flush message parser */
         borg_parse(NULL);
         borg_dont_react = false;
 
         /* 3b. Stale flow detection: if position didn't change after
          * sending a movement key, clear the cached flow so borg_think
-         * recalculates a new path. */
-        if (prev_x >= 0 && borg.c.x == prev_x && borg.c.y == prev_y) {
-            stuck_count++;
-            if (stuck_count >= 3 && borg.goal.type != 0) {
-                fprintf(stderr, "Remote borg[%d]: STUCK at (%d,%d) for %d turns, clearing goal type %d\n",
-                        remote_turn, borg.c.x, borg.c.y, stuck_count, borg.goal.type);
-                borg.goal.type = 0;
+         * recalculates a new path.
+         *
+         * IMPORTANT: Read the '@' position directly from Term->scr
+         * instead of using borg.c, because borg.c is only updated when
+         * borg_think() calls borg_update(), which hasn't happened yet
+         * for this frame. Using the stale borg.c causes false STUCK
+         * detections every 3 turns. */
+        {
+            int cur_x = -1, cur_y = -1;
+            /* Find '@' on the map area (rows 1-21 of the screen) */
+            for (int sy = 1; sy <= 21 && cur_x < 0; sy++) {
+                for (int sx = 0; sx < 80; sx++) {
+                    if (Term->scr->c[sy][sx] == '@') {
+                        /* Convert screen position to map position using
+                         * the viewport offset stored from STAT line */
+                        cur_x = sx + w_x;
+                        cur_y = (sy - 1) + w_y;
+                        break;
+                    }
+                }
+            }
+            if (prev_x >= 0 && cur_x == prev_x && cur_y == prev_y) {
+                stuck_count++;
+                if (stuck_count >= 15 && borg.goal.type != 0) {
+                    fprintf(stderr, "Remote borg[%d]: STUCK at (%d,%d) for %d turns, clearing goal type %d\n",
+                            remote_turn, cur_x, cur_y, stuck_count, borg.goal.type);
+                    borg.goal.type = 0;
+                    stuck_count = 0;
+                }
+            } else {
                 stuck_count = 0;
             }
-        } else {
-            stuck_count = 0;
         }
 
         /* 4. Send ONE queued key from previous think.
@@ -682,7 +716,7 @@ void borg_remote_loop(void)
         }
 
         /* 5. Run borg AI — uses borg's local RNG */
-        if (remote_turn < 500 || borg.trait[BI_CDEPTH] > 0)
+        if (remote_turn < 50 || remote_turn % 500 == 0)
             fprintf(stderr, "Remote borg: calling borg_think() [turn %d] "
                     "player_grid=(%d,%d) cave_dim=(%dx%d) depth=%d\n",
                     remote_turn,
@@ -702,9 +736,14 @@ void borg_remote_loop(void)
         Rand_quick = borg_rand_quick;
         Rand_value = borg_rand_value;
 
-        if (borg.trait[BI_CDEPTH] > 0)
-            fprintf(stderr, "Remote borg[%d]: after think: queue=%d goal=%d\n",
-                    remote_turn, borg_key_queue_depth(), borg.goal.type);
+        if (borg.trait[BI_CDEPTH] > 0 || remote_turn < 20)
+            fprintf(stderr, "Remote borg[%d]: after think: queue=%d goal=%d "
+                    "HP=%d/%d ACLW=%d ACSW=%d ACCW=%d FOOD=%d LIGHT=%d\n",
+                    remote_turn, borg_key_queue_depth(), borg.goal.type,
+                    borg.trait[BI_CURHP], borg.trait[BI_MAXHP],
+                    borg.trait[BI_ACLW], borg.trait[BI_ACSW],
+                    borg.trait[BI_ACCW], borg.trait[BI_FOOD],
+                    borg.trait[BI_LIGHT]);
 
         /* 6. JSON telemetry */
         borg_json_log_turn();

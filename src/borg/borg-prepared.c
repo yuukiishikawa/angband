@@ -30,6 +30,8 @@
 #include "borg-trait.h"
 #include "borg.h"
 
+extern bool borg_remote;  /* Remote mode flag (main-borg.c) */
+
 /* buffer for borg_prepared message
  */
 #define MAX_REASON 1024
@@ -62,8 +64,8 @@ static const char *borg_prepared_aux(int depth)
     if (borg.trait[BI_LIGHT] < 1)
         return ("1 Lite");
 
-    /* Require food */
-    if (borg.trait[BI_FOOD] < 5)
+    /* Require food (skip in remote mode — TS handles food differently) */
+    if (!borg_remote && borg.trait[BI_FOOD] < 5)
         return ("5 Food");
 
     /* Usually ready for level 1 */
@@ -79,7 +81,7 @@ static const char *borg_prepared_aux(int depth)
     /* Require recall */
     /* if (borg.trait[BI_RECALL] < 1) return ("1 recall"); */
 
-    if (!borg_cfg[BORG_PLAYS_RISKY]) {
+    if (!borg_cfg[BORG_PLAYS_RISKY] && !borg_remote) {
         /* Require 30 hp */
         if (borg.trait[BI_MAXHP] < 30)
             return ("30 hp");
@@ -91,7 +93,7 @@ static const char *borg_prepared_aux(int depth)
 
     /*** Essential Items for Level 3 and 4 ***/
 
-    if (!borg_cfg[BORG_PLAYS_RISKY]) {
+    if (!borg_cfg[BORG_PLAYS_RISKY] && !borg_remote) {
         /* class specific requirement */
         switch (borg.trait[BI_CLASS]) {
         case CLASS_WARRIOR:
@@ -137,7 +139,7 @@ static const char *borg_prepared_aux(int depth)
     }
 
     /* Potions of Cure Serious Wounds */
-    if ((borg.trait[BI_MAXCLEVEL] < 30)
+    if (!borg_remote && (borg.trait[BI_MAXCLEVEL] < 30)
         && borg.trait[BI_ACLW] + borg.trait[BI_ACSW] + borg.trait[BI_ACCW] < 2)
         return ("2 cure");
 
@@ -147,7 +149,7 @@ static const char *borg_prepared_aux(int depth)
 
     /*** Essential Items for Level 5 to 9 ***/
 
-    if (!borg_cfg[BORG_PLAYS_RISKY]) {
+    if (!borg_cfg[BORG_PLAYS_RISKY] && !borg_remote) {
         /* class specific requirement */
         if (borg.trait[BI_CDEPTH]) {
             switch (borg.trait[BI_CLASS]) {
@@ -195,12 +197,12 @@ static const char *borg_prepared_aux(int depth)
     }
 
     /* Potions of Cure Serious/Critical Wounds */
-    if ((borg.trait[BI_MAXCLEVEL] < 30)
+    if (!borg_remote && (borg.trait[BI_MAXCLEVEL] < 30)
         && borg.trait[BI_ACLW] + borg.trait[BI_ACSW] + borg.trait[BI_ACCW] < 2)
         return ("2 cures (clw + csw + ccw)");
 
     /* Scrolls of Word of Recall */
-    if (borg.trait[BI_RECALL] < 1)
+    if (!borg_remote && borg.trait[BI_RECALL] < 1)
         return ("1 recall");
 
     /* Usually ready for level 5 to 9 */

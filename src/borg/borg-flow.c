@@ -611,13 +611,19 @@ void borg_flow_enqueue_grid(int y, int x)
 bool borg_flow_commit(const char *who, int why)
 {
     int cost;
+    extern bool borg_remote;
+    extern bool borg_remote_descending;
 
     /* Cost of current grid */
     cost = borg_data_cost->data[borg.c.y][borg.c.x];
 
-    /* Verify the total "cost" */
-    if (cost >= 250)
-        return false;
+    /* Verify the total "cost" — allow larger limit in remote descent
+     * because TS dungeon levels can be very large (198x66) */
+    {
+        int cost_limit = (borg_remote && borg_remote_descending) ? 500 : 250;
+        if (cost >= cost_limit)
+            return false;
+    }
 
     /* Message */
     if (who)

@@ -272,6 +272,9 @@ void borg_init_item_val(void)
     sv_food_slice      = borg_lookup_sval_fail(tval, "Slice of Meat");
     sv_food_handful    = borg_lookup_sval_fail(tval, "Handful of Dried Fruits");
 
+    fprintf(stderr, "[BORG-SVAL] TV_FOOD=%d sv_food_ration=%d sv_food_apple=%d sv_food_slice=%d\n",
+            tval, sv_food_ration, sv_food_apple, sv_food_slice);
+
     tval               = tval_find_idx("mushroom");
     sv_mush_second_sight  = borg_lookup_sval_fail(tval, "Second Sight");
     sv_mush_fast_recovery = borg_lookup_sval_fail(tval, "Fast Recovery");
@@ -306,6 +309,11 @@ void borg_init_item_val(void)
     sv_potion_restore_mana = borg_lookup_sval_fail(tval, "Restore Mana");
     kv_potion_restore_mana = borg_lookup_kind(tval, sv_potion_restore_mana);
     sv_potion_cure_poison  = borg_lookup_sval_fail(tval, "Neutralize Poison");
+
+    fprintf(stderr, "[BORG-SVAL] TV_POTION=%d sv_clw=%d sv_csw=%d sv_ccw=%d sv_heal=%d sv_speed=%d sv_berserk=%d sv_heroism=%d\n",
+            tval, sv_potion_cure_light, sv_potion_cure_serious,
+            sv_potion_cure_critical, sv_potion_healing,
+            sv_potion_speed, sv_potion_berserk, sv_potion_heroism);
     sv_potion_resist_heat  = borg_lookup_sval_fail(tval, "Resist Heat");
     sv_potion_resist_cold  = borg_lookup_sval_fail(tval, "Resist Cold");
     sv_potion_resist_pois  = borg_lookup_sval_fail(tval, "Resist Poison");

@@ -22,6 +22,7 @@
 #ifdef ALLOW_BORG
 
 #include "../cave.h"
+#include "borg-danger.h"
 #include "borg-flow-kill.h"
 #include "borg-flow.h"
 #include "borg-io.h"
@@ -138,6 +139,14 @@ bool borg_flow_stair_less(int why, bool sneak)
 {
     int i;
 
+    /* Remote mode: never flee upward — town has no shops, going up is
+     * a waste of time.  Block ALL upward flee attempts here. */
+    {
+        extern bool borg_remote;
+        if (borg_remote)
+            return false;
+    }
+
     /* forced to go up */
     if (OPT(player, birth_force_descend))
         return false;
@@ -194,6 +203,13 @@ bool borg_flow_stair_more(int why, bool sneak, bool brave)
         return false;
     }
 
+    /* In remote mode, always respect borg_prepared() before descending.
+     * The proactive descent check already verifies prepared, but other
+     * callers (Lunal mode, flee, etc.) may bypass it. */
+    if (borg_remote
+        && borg_prepared(borg.trait[BI_CDEPTH] + 1) != NULL)
+        return false;
+
     /* if there are no down stairs, don't filter use of up stairs */
     if (track_less.num) {
         /* not unless safe or munchkin/Lunal Mode or brave */
@@ -207,11 +223,16 @@ bool borg_flow_stair_more(int why, bool sneak, bool brave)
                 || borg.trait[BI_FOOD] < 2))
             return false;
 
-        /* If I need to sell crap, then don't go down */
-        if (borg.trait[BI_CDEPTH] && borg.trait[BI_CLEVEL] < 25
-            && borg.trait[BI_GOLD] < 25000 && borg_count_sell() >= 13
-            && !borg.munchkin_mode)
-            return false;
+        /* If I need to sell crap, then don't go down
+         * (skip in remote mode — no shops available) */
+        {
+            extern bool borg_remote;
+            if (!borg_remote && borg.trait[BI_CDEPTH]
+                && borg.trait[BI_CLEVEL] < 25
+                && borg.trait[BI_GOLD] < 25000 && borg_count_sell() >= 13
+                && !borg.munchkin_mode)
+                return false;
+        }
 
         /* No diving if no light */
         if (borg.trait[BI_LIGHT] == 0 && borg.munchkin_mode == false)
@@ -228,15 +249,32 @@ bool borg_flow_stair_more(int why, bool sneak, bool brave)
 
     /* Enqueue useful grids */
     int enqueued = 0;
+    extern bool borg_remote_descending;
     for (i = 0; i < track_more.num; i++) {
-        /* Not if a monster is parked on the stair */
+        /* Not if a monster is parked on the stair —
+         * EXCEPT in remote descent mode: enqueue anyway so the borg
+         * flows to the stair, kills the monster, then descends. */
         if (borg_grids[track_more.y[i]][track_more.x[i]].kill) {
-            if (borg_remote) fprintf(stderr, "flow_stair_more: stair %d blocked by monster\n", i);
-            continue;
+            if (borg_remote && borg_remote_descending) {
+                fprintf(stderr, "flow_stair_more: stair %d has monster, enqueuing anyway (descent mode)\n", i);
+            } else {
+                if (borg_remote) fprintf(stderr, "flow_stair_more: stair %d blocked by monster\n", i);
+                continue;
+            }
         }
 
         /* Enqueue the grid */
         borg_flow_enqueue_grid(track_more.y[i], track_more.x[i]);
+        /* Check if it was actually enqueued (cost should be 0) */
+        if (borg_remote && borg_data_cost->data[track_more.y[i]][track_more.x[i]] != 0) {
+            fprintf(stderr, "flow_stair_more: stair %d at (%d,%d) REJECTED by enqueue "
+                "(cost=%d icky=%d) danger=%d avoidance=%d\n",
+                i, track_more.x[i], track_more.y[i],
+                borg_data_cost->data[track_more.y[i]][track_more.x[i]],
+                borg_data_icky->data[track_more.y[i]][track_more.x[i]],
+                borg_danger(track_more.y[i], track_more.x[i], 1, true, false),
+                avoidance);
+        }
         enqueued++;
     }
 
@@ -244,17 +282,22 @@ bool borg_flow_stair_more(int why, bool sneak, bool brave)
         static int fsm_dbg = 0;
         if (fsm_dbg++ < 30) {
             fprintf(stderr, "flow_stair_more: enqueued=%d stair@(%d,%d) borg@(%d,%d) "
-                "stair_feat=%d cave=%p cave_wid=%d cave_hgt=%d\n",
+                "stair_feat=%d cave=%p cave_wid=%d cave_hgt=%d queue=%d\n",
                 enqueued,
                 track_more.x[0], track_more.y[0],
                 borg.c.x, borg.c.y,
                 borg_grids[track_more.y[0]][track_more.x[0]].feat,
-                (void*)cave, cave ? (int)cave->width : -1, cave ? (int)cave->height : -1);
+                (void*)cave, cave ? (int)cave->width : -1, cave ? (int)cave->height : -1,
+                (flow_head >= flow_tail) ? (flow_head - flow_tail) : (flow_head + AUTO_FLOW_MAX - flow_tail));
         }
     }
 
-    /* Spread the flow */
-    borg_flow_spread(250, true, false, false, -1, sneak);
+    /* Spread the flow — use larger limit in remote descent mode because
+     * TS dungeon levels can be very large (198x66 = max distance ~260) */
+    {
+        int spread_depth = (borg_remote && borg_remote_descending) ? 500 : 250;
+        borg_flow_spread(spread_depth, true, false, false, -1, sneak);
+    }
 
     /* Attempt to Commit the flow */
     if (!borg_flow_commit("down-stairs", why)) {

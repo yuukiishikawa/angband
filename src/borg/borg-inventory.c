@@ -234,6 +234,7 @@ void borg_cheat_inven(void)
                 int tval, sval, qty;
                 int to_h, to_d, to_a;
                 int dd, ds, ac, weight;
+                int pval, timeout;
                 char name[80];
                 bool valid;
             };
@@ -261,13 +262,26 @@ void borg_cheat_inven(void)
                 item->ds     = e->ds;
                 item->ac     = e->ac;
                 item->weight = e->weight;
+                item->pval   = e->pval;
+                item->timeout = e->timeout;
 
-                /* Find kind index from tval+sval */
+                /* Find kind index from tval+sval and copy flags/modifiers */
                 for (int k = 1; k < z_info->k_max; k++) {
                     if (k_info[k].tval == e->tval && k_info[k].sval == e->sval) {
                         item->kind = k;
                         item->aware = true;
                         item->ident = true;
+
+                        /* Copy flags from kind (base + kind) */
+                        of_wipe(item->flags);
+                        if (k_info[k].base)
+                            of_union(item->flags, k_info[k].base->flags);
+                        of_union(item->flags, k_info[k].flags);
+
+                        /* Copy modifiers from kind (use base value) */
+                        for (int m = 0; m < OBJ_MOD_MAX; m++)
+                            item->modifiers[m] = k_info[k].modifiers[m].base;
+
                         break;
                     }
                 }
