@@ -474,6 +474,8 @@ bool borg_drop_junk(void)
         }
 
         /* drop it then ignore it */
+        fprintf(stderr, "[BORG-DROP] slot=%d letter='%c' tval=%d sval=%d qty=%d desc='%s'\n",
+                b_i, all_letters_nohjkl[b_i], item->tval, item->sval, item->iqty, item->desc);
         borg_keypress('d');
         borg_keypress(all_letters_nohjkl[b_i]);
 
@@ -941,6 +943,8 @@ bool borg_drop_hole(bool desperate)
         }
 
         /* drop it */
+        fprintf(stderr, "[BORG-DROP] slot=%d letter='%c' tval=%d sval=%d qty=%d desc='%s'\n",
+                b_i, all_letters_nohjkl[b_i], item->tval, item->sval, item->iqty, item->desc);
         borg_keypress('d');
         borg_keypress(all_letters_nohjkl[b_i]);
         if (item->iqty > 1) {
@@ -1155,6 +1159,8 @@ bool borg_drop_slow(void)
         }
 
         /* Drop one item */
+        fprintf(stderr, "[BORG-DROP] slot=%d tval=%d sval=%d qty=%d desc='%s'\n",
+                b_i, item->tval, item->sval, item->iqty, item->desc);
         borg_keypress('d');
         if (b_i < INVEN_WIELD) {
             borg_keypress(all_letters_nohjkl[b_i]);
@@ -1268,6 +1274,8 @@ bool borg_dump_quiver(void)
         }
 
         /* Drop it */
+        fprintf(stderr, "[BORG-DROP] quiver slot=%d tval=%d sval=%d qty=%d desc='%s'\n",
+                b_i, item->tval, item->sval, item->iqty, item->desc);
         borg_keypress('d');
         borg_keypress('|');
         borg_keypress(b_i - QUIVER_START + '0');

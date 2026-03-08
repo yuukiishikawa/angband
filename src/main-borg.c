@@ -36,6 +36,10 @@
 #include "cave.h"           /* FEAT_MORE, FEAT_LESS */
 #include "player-timed.h"   /* TMD_FOOD, PY_FOOD_FULL */
 
+/* w_x/w_y: borg panel offset (defined in borg.c, declared in borg.h) */
+extern int w_x;
+extern int w_y;
+
 /* Forward declarations for borg stair/grid access (avoid pulling all borg headers) */
 /* NOTE: must match borg-flow.h exactly — int16_t fields! */
 struct borg_track {
@@ -378,8 +382,8 @@ static void parse_stat_line(const char *line)
         else if (streq(key, "wis"))   player->stat_cur[2] = val;
         else if (streq(key, "dex"))   player->stat_cur[3] = val;
         else if (streq(key, "con"))   player->stat_cur[4] = val;
-        else if (streq(key, "wx") && Term)  Term->offset_x = val;
-        else if (streq(key, "wy") && Term)  Term->offset_y = val;
+        else if (streq(key, "wx")) { w_x = val; if (Term) Term->offset_x = val; }
+        else if (streq(key, "wy")) { w_y = val; if (Term) Term->offset_y = val; }
         else if (streq(key, "px"))   player->grid.x = val;
         else if (streq(key, "py"))   player->grid.y = val;
         else if (streq(key, "food")) {

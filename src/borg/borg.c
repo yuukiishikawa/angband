@@ -425,6 +425,9 @@ static struct keypress internal_borg_inkey(int flush_first)
             /* Terminate */
             buf[k] = '\0';
 
+            /* Capture message for action log */
+            borg_json_log_set_msg(buf);
+
             /* Parse it */
             borg_parse(buf);
         }
@@ -498,8 +501,13 @@ static struct keypress internal_borg_inkey(int flush_first)
     while (!borg_think()) /* loop */
         ;
 
-    /* Record this turn for JSON analysis log */
-    borg_json_log_turn();
+    /* Record this turn for JSON analysis log (also writes CSV action log) */
+    {
+        keycode_t peek_key = borg_inkey(false);
+        int log_key = peek_key ? (int)peek_key : 0;
+        borg_json_log_set_key(log_key);
+        borg_json_log_turn();
+    }
 
     /* Update the status screen */
     borg_status();
@@ -560,6 +568,9 @@ void borg_remote_loop(void)
     borg_note("# Remote borg loop starting");
     fprintf(stderr, "Remote borg: loop starting\n");
 
+    /* Open CSV action log for remote mode */
+    borg_action_log_open("remote");
+
     int remote_turn = 0;
     int prev_x = -1, prev_y = -1;
     int stuck_count = 0;
@@ -607,6 +618,7 @@ void borg_remote_loop(void)
             /* Log ALL non-empty messages */
             fprintf(stderr, "Remote borg[%d]: MSG [%s] attr=%d\n",
                     remote_turn, buf, t_a);
+            borg_json_log_set_msg(buf);
             borg_parse(buf);
         }
 
@@ -679,6 +691,41 @@ void borg_remote_loop(void)
             } else {
                 stuck_count = 0;
             }
+
+            /* 3c. Oscillation detection: if position alternates between
+             * two points (common when borg overshoots a stair due to
+             * multi-key queueing), detect and clear goal. */
+            {
+                static int osc_x1 = -1, osc_y1 = -1;
+                static int osc_x2 = -1, osc_y2 = -1;
+                static int osc_count = 0;
+                if (cur_x >= 0 && prev_x >= 0 && cur_x != prev_x) {
+                    /* Check if we're oscillating between the same 2 points */
+                    if ((cur_x == osc_x1 && cur_y == osc_y1 &&
+                         prev_x == osc_x2 && prev_y == osc_y2) ||
+                        (cur_x == osc_x2 && cur_y == osc_y2 &&
+                         prev_x == osc_x1 && prev_y == osc_y1)) {
+                        osc_count++;
+                        if (osc_count >= 6 && borg.goal.type != 0) {
+                            fprintf(stderr, "Remote borg[%d]: OSCILLATION (%d,%d)<->(%d,%d) for %d cycles, clearing goal type %d\n",
+                                    remote_turn, osc_x1, osc_y1, osc_x2, osc_y2, osc_count, borg.goal.type);
+                            borg.goal.type = 0;
+                            osc_count = 0;
+                            /* Also clear descent flag to allow re-evaluation */
+                            extern bool borg_remote_descending;
+                            borg_remote_descending = false;
+                        }
+                    } else {
+                        /* New pair of positions */
+                        osc_x1 = prev_x; osc_y1 = prev_y;
+                        osc_x2 = cur_x;  osc_y2 = cur_y;
+                        osc_count = 1;
+                    }
+                } else if (cur_x == prev_x && cur_y == prev_y) {
+                    /* Same position — not oscillation, reset */
+                    osc_count = 0;
+                }
+            }
         }
 
         /* 4. Send ONE queued key from previous think.
@@ -747,6 +794,17 @@ void borg_remote_loop(void)
         Rand_quick = borg_rand_quick;
         Rand_value = borg_rand_value;
 
+        /* Prevent stair overshoot: when descending, the borg may queue
+         * 2 movement keys (direction+direction).  Since we send one key
+         * per frame, the first key lands on the stair but the second key
+         * immediately walks past it.  Flush extra keys so the borg
+         * re-evaluates after each step and can detect it's on a stair. */
+        if (borg.goal.type == GOAL_BORE && borg_key_queue_depth() > 1) {
+            keycode_t first = borg_inkey(true);  /* save the first key */
+            borg_flush();                        /* discard the rest */
+            borg_keypress(first);                /* re-queue only the first */
+        }
+
         if (borg.trait[BI_CDEPTH] > 0 || remote_turn < 20)
             fprintf(stderr, "Remote borg[%d]: after think: queue=%d goal=%d "
                     "HP=%d/%d ACLW=%d ACSW=%d ACCW=%d FOOD=%d LIGHT=%d\n",
@@ -756,8 +814,13 @@ void borg_remote_loop(void)
                     borg.trait[BI_ACCW], borg.trait[BI_FOOD],
                     borg.trait[BI_LIGHT]);
 
-        /* 6. JSON telemetry */
-        borg_json_log_turn();
+        /* 6. JSON telemetry (also writes CSV action log) */
+        {
+            keycode_t peek_key = borg_inkey(false);
+            int log_key = peek_key ? (int)peek_key : 's';
+            borg_json_log_set_key(log_key);
+            borg_json_log_turn();
+        }
 
         /* 7. Send first queued key immediately after think.
          * Remaining keys stay in queue for step 4 on subsequent

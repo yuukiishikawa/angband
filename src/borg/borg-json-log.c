@@ -41,6 +41,10 @@
 /* Current strategy name — set by borg_think_dungeon branches */
 const char *borg_json_strategy = "Unknown";
 
+/* Per-turn action detail — set before borg_json_log_turn() */
+static int  pending_key = 0;
+static char pending_msg[256] = "";
+
 /*
  * A single log entry matching the BorgLogEntry TypeScript interface
  */
@@ -57,6 +61,12 @@ typedef struct {
     int player_level;
     float exploration;
     char strategy[32];
+    int key_code;
+    int goal_type;
+    int food;
+    int pos_x;
+    int pos_y;
+    char msg[128];
 } borg_json_entry;
 
 /* Dynamic array of log entries */
@@ -66,6 +76,9 @@ static int log_capacity;
 
 /* Stats tracked across the run */
 static int lowest_hp;
+
+/* CSV action log file */
+static FILE *action_log_fp = NULL;
 
 /*
  * Calculate the exploration ratio for the current dungeon level.
@@ -90,6 +103,94 @@ static float calc_exploration_ratio(void)
         return 0.0f;
 
     return (float)marked / (float)total;
+}
+
+/*
+ * Set the key code for current turn's log entry.
+ */
+void borg_json_log_set_key(int key_code)
+{
+    pending_key = key_code;
+}
+
+/*
+ * Set the game message for current turn's log entry.
+ */
+void borg_json_log_set_msg(const char *msg)
+{
+    if (msg && msg[0])
+        my_strcpy(pending_msg, msg, sizeof(pending_msg));
+    else
+        pending_msg[0] = '\0';
+}
+
+/*
+ * Open a CSV action log file for C-vs-TS comparison.
+ * mode_name: "local" or "remote"
+ */
+void borg_action_log_open(const char *mode_name)
+{
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/borg_action_%s.csv", mode_name);
+    action_log_fp = fopen(path, "w");
+    if (action_log_fp)
+        fprintf(action_log_fp,
+            "turn,depth,lev,hp,mhp,sp,msp,kills,gold,food,goal,strategy,"
+            "key,key_ch,x,y,msg\n");
+}
+
+/*
+ * Write one CSV line for the current turn.
+ */
+void borg_action_log_write(int turn, int key_code)
+{
+    if (!action_log_fp)
+        return;
+
+    char ch = (key_code >= 32 && key_code < 127 && key_code != ',') ? (char)key_code : '?';
+    /* Escape commas/quotes in msg */
+    char safe_msg[256];
+    int j = 0;
+    for (int i = 0; pending_msg[i] && j < 250; i++) {
+        if (pending_msg[i] == '"') {
+            safe_msg[j++] = '\'';
+        } else if (pending_msg[i] == ',') {
+            safe_msg[j++] = ';';
+        } else {
+            safe_msg[j++] = pending_msg[i];
+        }
+    }
+    safe_msg[j] = '\0';
+
+    fprintf(action_log_fp,
+        "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%c,%d,%d,%s\n",
+        turn,
+        borg.trait[BI_CDEPTH],
+        borg.trait[BI_CLEVEL],
+        borg.trait[BI_CURHP],
+        borg.trait[BI_MAXHP],
+        borg.trait[BI_CURSP],
+        borg.trait[BI_MAXSP],
+        borg_kills_cnt,
+        borg.trait[BI_GOLD],
+        borg.trait[BI_FOOD],
+        borg.goal.type,
+        borg_json_strategy,
+        key_code, ch,
+        borg.c.x, borg.c.y,
+        safe_msg);
+    fflush(action_log_fp);
+}
+
+/*
+ * Close the CSV action log.
+ */
+void borg_action_log_close(void)
+{
+    if (action_log_fp) {
+        fclose(action_log_fp);
+        action_log_fp = NULL;
+    }
 }
 
 /*
@@ -143,12 +244,25 @@ void borg_json_log_turn(void)
 
     my_strcpy(e->strategy, borg_json_strategy, sizeof(e->strategy));
 
+    /* Action details */
+    e->key_code  = pending_key;
+    e->goal_type = borg.goal.type;
+    e->food      = borg.trait[BI_FOOD];
+    e->pos_x     = borg.c.x;
+    e->pos_y     = borg.c.y;
+    my_strcpy(e->msg, pending_msg, sizeof(e->msg));
+
     /* Track lowest HP */
     if (e->hp < lowest_hp)
         lowest_hp = e->hp;
 
-    /* Reset strategy for next turn */
+    /* Write CSV action log line before resetting state */
+    borg_action_log_write((int)e->turn, e->key_code);
+
+    /* Reset per-turn state */
     borg_json_strategy = "Unknown";
+    pending_key = 0;
+    pending_msg[0] = '\0';
 }
 
 /*
@@ -189,14 +303,29 @@ void borg_json_log_finish(void)
     for (i = 0; i < log_count; i++) {
         borg_json_entry *e = &log_entries[i];
 
+        /* Escape message for JSON */
+        char json_msg[256];
+        {
+            int ji = 0;
+            for (int mi = 0; e->msg[mi] && ji < 250; mi++) {
+                if (e->msg[mi] == '"' || e->msg[mi] == '\\') {
+                    json_msg[ji++] = '\\';
+                }
+                json_msg[ji++] = e->msg[mi];
+            }
+            json_msg[ji] = '\0';
+        }
+
         file_putf(f,
             "  {\"turn\":%d,\"depth\":%d,\"strategy\":\"%s\","
-            "\"command\":\"%s\","
+            "\"key\":%d,\"goal\":%d,\"food\":%d,"
+            "\"x\":%d,\"y\":%d,\"msg\":\"%s\","
             "\"hp\":%d,\"mhp\":%d,\"sp\":%d,\"msp\":%d,"
             "\"danger\":%d,\"monsterCount\":%d,"
             "\"exploration\":%.2f,\"gold\":%d,\"playerLevel\":%d}",
             (int)e->turn, e->depth, e->strategy,
-            e->strategy, /* command = strategy for now */
+            e->key_code, e->goal_type, e->food,
+            e->pos_x, e->pos_y, json_msg,
             e->hp, e->mhp, e->sp, e->msp,
             e->danger, e->monster_count,
             e->exploration, e->gold, e->player_level);
@@ -227,6 +356,9 @@ void borg_json_log_finish(void)
     log_entries  = NULL;
     log_count    = 0;
     log_capacity = 0;
+
+    /* Close CSV action log if open */
+    borg_action_log_close();
 }
 
 #endif

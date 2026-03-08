@@ -288,6 +288,19 @@ void borg_cheat_inven(void)
 
                 my_strcpy(item->desc, e->name, sizeof(item->desc));
             }
+            /* Dump borg_items after INVEN load (first 10 frames only) */
+            {
+                static int inven_dump_count = 0;
+                if (inven_dump_count < 10) {
+                    fprintf(stderr, "[INVEN-LOADED] frame=%d borg_items:\n", inven_dump_count);
+                    for (i = 0; i < z_info->pack_size && i < 12; i++) {
+                        if (borg_items[i].iqty > 0)
+                            fprintf(stderr, "  [%d] tval=%d sval=%d qty=%d desc='%s'\n",
+                                    i, borg_items[i].tval, borg_items[i].sval, borg_items[i].iqty, borg_items[i].desc);
+                    }
+                    inven_dump_count++;
+                }
+            }
             return;
         }
     }
