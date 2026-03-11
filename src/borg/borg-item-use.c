@@ -86,6 +86,17 @@ bool borg_quaff_potion(int sval)
 
     /* Log the message */
     borg_note(format("# Quaffing %s.", borg_items[i].desc));
+    fprintf(stderr, "[BORG-QUAFF] slot=%d letter='%c' tval=%d sval=%d qty=%d desc='%s'\n",
+            i, all_letters_nohjkl[i], borg_items[i].tval, sval, borg_items[i].iqty, borg_items[i].desc);
+    /* Dump full inventory for diagnosis */
+    {
+        fprintf(stderr, "[BORG-QUAFF-DIAG] borg_items dump:\n");
+        for (int di = 0; di < z_info->pack_size && di < 12; di++) {
+            if (borg_items[di].iqty > 0)
+                fprintf(stderr, "  [%d] tval=%d sval=%d qty=%d desc='%s'\n",
+                        di, borg_items[di].tval, borg_items[di].sval, borg_items[di].iqty, borg_items[di].desc);
+        }
+    }
 
     /* Perform the action */
     borg_keypress('q');
@@ -173,6 +184,8 @@ bool borg_read_scroll(int sval)
 
     /* Log the message */
     borg_note(format("# Reading %s.", borg_items[i].desc));
+    fprintf(stderr, "[BORG-READ] slot=%d letter='%c' tval=%d sval=%d qty=%d desc='%s'\n",
+            i, all_letters_nohjkl[i], borg_items[i].tval, sval, borg_items[i].iqty, borg_items[i].desc);
 
     /* Perform the action */
     borg_keypress(ESCAPE);

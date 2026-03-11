@@ -155,6 +155,18 @@ bool borg_think(void)
 
     /*** Process inventory/equipment ***/
 
+    /* In remote mode, always refresh inventory/equipment from INVEN protocol
+     * data.  In normal mode, borg_update() detects screen changes and sets
+     * these flags; but in remote mode the screen doesn't show inventory, so
+     * the flags never get set after the first frame. */
+    {
+        extern bool borg_remote;
+        if (borg_remote) {
+            borg_do_equip = true;
+            borg_do_inven = true;
+        }
+    }
+
     /* Cheat */
     if (borg_do_equip) {
         /* Only do it once */

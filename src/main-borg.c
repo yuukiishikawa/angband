@@ -28,6 +28,7 @@
  *    are included in all such copies.  Other copyrights may also apply.
  */
 
+#include <stdint.h>
 #include "angband.h"
 #include "main.h"
 #include "ui-game.h"
@@ -35,6 +36,10 @@
 #include "init.h"           /* z_info */
 #include "cave.h"           /* FEAT_MORE, FEAT_LESS */
 #include "player-timed.h"   /* TMD_FOOD, PY_FOOD_FULL */
+
+/* w_x/w_y: borg panel offset (defined in borg.c, declared in borg.h) */
+extern int w_x;
+extern int w_y;
 
 /* Forward declarations for borg stair/grid access (avoid pulling all borg headers) */
 /* NOTE: must match borg-flow.h exactly — int16_t fields! */
@@ -378,8 +383,8 @@ static void parse_stat_line(const char *line)
         else if (streq(key, "wis"))   player->stat_cur[2] = val;
         else if (streq(key, "dex"))   player->stat_cur[3] = val;
         else if (streq(key, "con"))   player->stat_cur[4] = val;
-        else if (streq(key, "wx") && Term)  Term->offset_x = val;
-        else if (streq(key, "wy") && Term)  Term->offset_y = val;
+        else if (streq(key, "wx")) { w_x = val; if (Term) Term->offset_x = val; }
+        else if (streq(key, "wy")) { w_y = val; if (Term) Term->offset_y = val; }
         else if (streq(key, "px"))   player->grid.x = val;
         else if (streq(key, "py"))   player->grid.y = val;
         else if (streq(key, "food")) {
@@ -418,6 +423,8 @@ struct remote_inven_entry {
     int to_h, to_d, to_a;
     int dd, ds, ac, weight;
     int pval, timeout;
+    uint64_t flags;    /* ObjectFlag bits from TS (hex-encoded) */
+    uint32_t resists;  /* Element resistance bits (bit N = resist element N) */
     char name[80];
     bool valid;
 };
@@ -433,12 +440,30 @@ static void parse_inven_line(const char *line)
     struct remote_inven_entry *e = &borg_remote_inven[borg_remote_inven_count];
     memset(e, 0, sizeof(*e));
 
-    if (sscanf(line, "INVEN %d %d %d %d %d %d %d %d %d %d %d %d %d %79s",
+    /* Try new format first: INVEN <slot> ... <timeout> <flags_hex> <resists_hex> <name> */
+    char flags_hex[20] = {0};
+    char resists_hex[12] = {0};
+    int parsed = sscanf(line, "INVEN %d %d %d %d %d %d %d %d %d %d %d %d %d %19s %11s %79s",
                &e->slot, &e->tval, &e->sval, &e->qty,
                &e->to_h, &e->to_d, &e->to_a,
                &e->dd, &e->ds, &e->ac, &e->weight,
-               &e->pval, &e->timeout, e->name) < 14)
+               &e->pval, &e->timeout, flags_hex, resists_hex, e->name);
+
+    if (parsed >= 16) {
+        /* New format with flags + resists */
+        e->flags = strtoull(flags_hex, NULL, 16);
+        e->resists = (uint32_t)strtoul(resists_hex, NULL, 16);
+    } else if (sscanf(line, "INVEN %d %d %d %d %d %d %d %d %d %d %d %d %d %79s",
+               &e->slot, &e->tval, &e->sval, &e->qty,
+               &e->to_h, &e->to_d, &e->to_a,
+               &e->dd, &e->ds, &e->ac, &e->weight,
+               &e->pval, &e->timeout, e->name) >= 14) {
+        /* Old format without flags/resists — backwards compatible */
+        e->flags = 0;
+        e->resists = 0;
+    } else {
         return;
+    }
 
     /* Replace underscores with spaces in name */
     for (int i = 0; e->name[i]; i++)
@@ -449,8 +474,9 @@ static void parse_inven_line(const char *line)
 
     /* Debug: log parsed INVEN data */
     if (borg_remote_inven_count <= 40) {
-        fprintf(stderr, "[INVEN-RECV] slot=%d tval=%d sval=%d qty=%d dd=%d ds=%d toH=%d toD=%d toA=%d ac=%d wt=%d pval=%d name='%s'\n",
-                e->slot, e->tval, e->sval, e->qty, e->dd, e->ds, e->to_h, e->to_d, e->to_a, e->ac, e->weight, e->pval, e->name);
+        fprintf(stderr, "[INVEN-RECV] slot=%d tval=%d sval=%d qty=%d dd=%d ds=%d toH=%d toD=%d toA=%d ac=%d wt=%d pval=%d flags=%016llx res=%08x name='%s'\n",
+                e->slot, e->tval, e->sval, e->qty, e->dd, e->ds, e->to_h, e->to_d, e->to_a, e->ac, e->weight, e->pval,
+                (unsigned long long)e->flags, e->resists, e->name);
     }
 }
 

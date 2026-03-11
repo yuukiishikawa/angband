@@ -452,9 +452,14 @@ void borg_flow_spread(int depth, bool optimize, bool avoid, bool tunneling,
                  */
             }
 
-            /* Ignore "icky" grids */
-            if (borg_data_icky->data[y][x])
-                continue;
+            /* Ignore "icky" grids
+             * In remote descent mode, allow icky grids so the borg can
+             * path to stairs outside the viewport. */
+            {
+                extern bool borg_remote_descending;
+                if (borg_data_icky->data[y][x] && !borg_remote_descending)
+                    continue;
+            }
 
             /* Analyze every grid once */
             if (!borg_data_know->data[y][x]) {
@@ -535,9 +540,12 @@ void borg_flow_enqueue_grid(int y, int x)
     int fear = 0;
     int p;
 
-    /* Avoid icky grids */
-    if (borg_data_icky->data[y][x])
-        return;
+    /* Avoid icky grids (bypass in remote descent mode) */
+    {
+        extern bool borg_remote_descending;
+        if (borg_data_icky->data[y][x] && !borg_remote_descending)
+            return;
+    }
 
     /* Unknown */
     if (!borg_data_know->data[y][x]) {

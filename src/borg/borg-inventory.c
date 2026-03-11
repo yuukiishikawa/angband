@@ -17,6 +17,7 @@
  *    are included in all such copies.  Other copyrights may also apply.
  */
 
+#include <stdint.h>
 #include "borg-inventory.h"
 
 #ifdef ALLOW_BORG
@@ -235,6 +236,8 @@ void borg_cheat_inven(void)
                 int to_h, to_d, to_a;
                 int dd, ds, ac, weight;
                 int pval, timeout;
+                uint64_t flags;
+                uint32_t resists;
                 char name[80];
                 bool valid;
             };
@@ -286,7 +289,37 @@ void borg_cheat_inven(void)
                     }
                 }
 
+                /* Overlay TS-provided flags if available (includes ego/artifact flags) */
+                if (e->flags != 0) {
+                    of_wipe(item->flags);
+                    for (int b = 0; b < 64 && b < OF_MAX; b++) {
+                        if (e->flags & ((uint64_t)1 << b))
+                            of_on(item->flags, b);
+                    }
+                }
+
+                /* Set element resistances from TS bitmask */
+                if (e->resists != 0) {
+                    for (int el = 0; el < 32 && el < ELEM_MAX; el++) {
+                        if (e->resists & (1u << el))
+                            item->el_info[el].res_level = 1;
+                    }
+                }
+
                 my_strcpy(item->desc, e->name, sizeof(item->desc));
+            }
+            /* Dump borg_items after INVEN load (first 10 frames only) */
+            {
+                static int inven_dump_count = 0;
+                if (inven_dump_count < 10) {
+                    fprintf(stderr, "[INVEN-LOADED] frame=%d borg_items:\n", inven_dump_count);
+                    for (i = 0; i < z_info->pack_size && i < 12; i++) {
+                        if (borg_items[i].iqty > 0)
+                            fprintf(stderr, "  [%d] tval=%d sval=%d qty=%d desc='%s'\n",
+                                    i, borg_items[i].tval, borg_items[i].sval, borg_items[i].iqty, borg_items[i].desc);
+                    }
+                    inven_dump_count++;
+                }
             }
             return;
         }

@@ -54,6 +54,7 @@
 #include "borg-reincarnate.h"
 #include "borg-store.h"
 #include "borg-update.h"
+#include "borg-json-log.h"
 
 struct borg_commands
 {
@@ -1688,6 +1689,13 @@ void borg_headless_activate(void)
     }
 
     borg_update_entrypoint(true);
+
+    /* Open CSV action log for local mode (remote opens its own) */
+    {
+        extern bool borg_remote;
+        if (!borg_remote)
+            borg_action_log_open("local");
+    }
 }
 
 #endif

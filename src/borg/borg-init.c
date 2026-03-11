@@ -76,8 +76,8 @@ struct borg_setting borg_settings[] = {
     { "borg_stop_king", 'b', true },
     { "borg_cheat_death", 'b', false },
     { "borg_respawn_winners", 'b', false },
-    { "borg_respawn_class", 'i', -1 }, 
-    { "borg_respawn_race", 'i', -1 },
+    { "borg_respawn_class", 'i', 0 },  /* 0=Warrior — match TS remote */
+    { "borg_respawn_race", 'i', 0 },   /* 0=Human — match TS remote */
     { "borg_chest_fail_tolerance", 'i', 7 },
     { "borg_delay_factor", 'i', 0 }, 
     { "borg_money_scum_amount", 'i', 0 },

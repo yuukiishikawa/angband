@@ -33,5 +33,14 @@ extern void borg_json_log_init(void);
 extern void borg_json_log_turn(void);
 extern void borg_json_log_finish(void);
 
+/* Per-turn action detail setters — call before borg_json_log_turn() */
+extern void borg_json_log_set_key(int key_code);
+extern void borg_json_log_set_msg(const char *msg);
+
+/* CSV action log for C-vs-TS comparison */
+extern void borg_action_log_open(const char *mode_name);
+extern void borg_action_log_write(int turn, int key_code);
+extern void borg_action_log_close(void);
+
 #endif
 #endif
