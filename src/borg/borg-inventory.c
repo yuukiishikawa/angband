@@ -17,6 +17,7 @@
  *    are included in all such copies.  Other copyrights may also apply.
  */
 
+#include <stdint.h>
 #include "borg-inventory.h"
 
 #ifdef ALLOW_BORG
@@ -235,6 +236,8 @@ void borg_cheat_inven(void)
                 int to_h, to_d, to_a;
                 int dd, ds, ac, weight;
                 int pval, timeout;
+                uint64_t flags;
+                uint32_t resists;
                 char name[80];
                 bool valid;
             };
@@ -283,6 +286,23 @@ void borg_cheat_inven(void)
                             item->modifiers[m] = k_info[k].modifiers[m].base;
 
                         break;
+                    }
+                }
+
+                /* Overlay TS-provided flags if available (includes ego/artifact flags) */
+                if (e->flags != 0) {
+                    of_wipe(item->flags);
+                    for (int b = 0; b < 64 && b < OF_MAX; b++) {
+                        if (e->flags & ((uint64_t)1 << b))
+                            of_on(item->flags, b);
+                    }
+                }
+
+                /* Set element resistances from TS bitmask */
+                if (e->resists != 0) {
+                    for (int el = 0; el < 32 && el < ELEM_MAX; el++) {
+                        if (e->resists & (1u << el))
+                            item->el_info[el].res_level = 1;
                     }
                 }
 
