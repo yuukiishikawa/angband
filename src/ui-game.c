@@ -724,12 +724,31 @@ static bool start_game(bool new_game)
 
 	/* No living character loaded */
 	if (player->is_dead || new_game) {
-#ifdef ALLOW_BORG
-		if (borg_headless) {
-			borg_auto_birth();
-		} else
-#endif
+		bool auto_birth_done = false;
+#ifdef USE_HTTP_FRONTEND
 		{
+			extern bool http_headless;
+			if (http_headless) {
+				/* Temporarily set borg_remote to force Human/Warrior */
+				extern bool borg_remote;
+				bool saved_remote = borg_remote;
+				borg_remote = true;
+				fprintf(stderr, "[HTTP] Using borg_auto_birth (Human/Warrior)\n");
+				extern void borg_auto_birth(void);
+				borg_auto_birth();
+				borg_remote = saved_remote;
+				fprintf(stderr, "[HTTP] Character created\n");
+				auto_birth_done = true;
+			}
+		}
+#endif
+#ifdef ALLOW_BORG
+		if (!auto_birth_done && borg_headless) {
+			borg_auto_birth();
+			auto_birth_done = true;
+		}
+#endif
+		if (!auto_birth_done) {
 			character_generated = false;
 			textui_do_birth();
 		}
@@ -964,6 +983,19 @@ void play_game(enum game_mode_type mode)
 				borg_remote_loop();
 				quit("Remote borg session ended");
 				break;
+			}
+		}
+#endif
+
+		/* HTTP frontend: set up HTTP server and use HTTP-driven cmd_get_hook */
+#ifdef USE_HTTP_FRONTEND
+		{
+			extern bool http_headless;
+			if (http_headless) {
+				extern void http_game_loop(void);
+				http_game_loop();
+				/* http_game_loop sets cmd_get_hook and returns.
+				 * The normal while loop below drives the game. */
 			}
 		}
 #endif

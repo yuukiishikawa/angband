@@ -95,6 +95,10 @@ static const struct module modules[] =
 	{ "borg", help_borg, init_borg_mode },
 #endif
 
+#ifdef USE_HTTP_FRONTEND
+	{ "http", help_http, init_http },
+#endif
+
 #ifdef USE_IBM
 	{ "ibm", help_ibm, init_ibm },
 #endif /* USE_IBM */
