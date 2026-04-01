@@ -42,6 +42,7 @@ extern errr init_test(int argc, char **argv);
 extern errr init_stats(int argc, char **argv);
 extern errr init_spoil(int argc, char **argv);
 extern errr init_borg_mode(int argc, char **argv);
+extern errr init_http(int argc, char **argv);
 
 extern bool borg_headless;
 extern bool borg_remote;
@@ -66,6 +67,7 @@ extern const char help_test[];
 extern const char help_stats[];
 extern const char help_spoil[];
 extern const char help_borg[];
+extern const char help_http[];
 
 
 struct module

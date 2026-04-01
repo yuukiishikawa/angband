@@ -26,6 +26,7 @@ option(SUPPORT_STATIC_LINKING "Enable static linking where possible" OFF)
 option(SUPPORT_STATS_BACKEND "Enable backend support for statistics and related debugging commands.  Implied by SUPPORT_STATS_FRONTEND." OFF)
 option(SUPPORT_BORG "Support for Borg." ON)
 option(SUPPORT_BORG_FRONTEND "Support for headless borg front end." OFF)
+option(SUPPORT_HTTP_FRONTEND "Support for HTTP server frontend for AI play." OFF)
 option(SUPPORT_BORG_HIGH_SCORES "Borg characters allowed in high scores." OFF)
 
 # By default, generate a self-contained build left where the build was run.
@@ -431,6 +432,7 @@ add_executable(OurExecutable
         $<$<BOOL:${SUPPORT_STATS_FRONTEND}>:src/stats/db.c>
         $<$<BOOL:${SUPPORT_TEST_FRONTEND}>:src/main-test.c>
         $<$<BOOL:${SUPPORT_BORG_FRONTEND}>:src/main-borg.c>
+        $<$<BOOL:${SUPPORT_HTTP_FRONTEND}>:src/main-http.c>
         $<$<NOT:$<BOOL:${SUPPORT_WINDOWS_FRONTEND}>>:src/main.c>
 )
 
@@ -519,6 +521,12 @@ endif()
 if(SUPPORT_BORG_FRONTEND)
     target_compile_definitions(OurExecutable PRIVATE -D USE_BORG_FRONTEND)
     message(STATUS "Support for headless borg front end - Ready")
+endif()
+
+if(SUPPORT_HTTP_FRONTEND)
+    target_compile_definitions(OurExecutable PRIVATE -D USE_HTTP_FRONTEND)
+    target_compile_definitions(OurCoreLib PRIVATE -D USE_HTTP_FRONTEND)
+    message(STATUS "Support for HTTP server frontend - Ready")
 endif()
 
 if(SUPPORT_COVERAGE)
